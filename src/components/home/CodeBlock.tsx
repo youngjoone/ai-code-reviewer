@@ -18,7 +18,7 @@ export function CodeBlock({
   onCopy,
 }: CodeBlockProps) {
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-3">
+    <article className="rounded-lg border border-slate-200/90 bg-slate-50/50 p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
           {title}

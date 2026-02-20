@@ -22,7 +22,7 @@ export function ResponsePanel({
   onCopy,
 }: ResponsePanelProps) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white/80 p-4 text-sm leading-6 text-slate-700">
+    <section className="pt-6 text-sm leading-6 text-slate-700">
       <div className="flex items-center justify-between">
         <p className="font-semibold uppercase tracking-[0.12em] text-slate-500">
           API Response
@@ -38,7 +38,7 @@ export function ResponsePanel({
 
       {result ? (
         <div className="mt-3 space-y-3">
-          <article className="rounded-xl border border-slate-200 bg-white p-3">
+          <article className="rounded-lg border border-slate-200/90 bg-slate-50/50 p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
               Summary
             </p>
@@ -47,7 +47,7 @@ export function ResponsePanel({
 
           {result.mode === "review" ? (
             <>
-              <article className="rounded-xl border border-slate-200 bg-white p-3">
+              <article className="rounded-lg border border-slate-200/90 bg-slate-50/50 p-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
                   Input
                 </p>
@@ -67,7 +67,7 @@ export function ResponsePanel({
                 </div>
               </article>
 
-              <article className="rounded-xl border border-slate-200 bg-white p-3">
+              <article className="rounded-lg border border-slate-200/90 bg-slate-50/50 p-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
                   Issues
                 </p>
@@ -78,7 +78,7 @@ export function ResponsePanel({
                     {result.issues.map((issue) => (
                       <li
                         key={issue.id}
-                        className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+                        className="rounded-md border border-slate-200 bg-white/70 p-3"
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <span
@@ -109,7 +109,7 @@ export function ResponsePanel({
                 onCopy={onCopy}
               />
 
-              <article className="rounded-xl border border-slate-200 bg-white p-3">
+              <article className="rounded-lg border border-slate-200/90 bg-slate-50/50 p-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
                   Suggested Tests
                 </p>
@@ -122,7 +122,7 @@ export function ResponsePanel({
             </>
           ) : (
             <>
-              <article className="rounded-xl border border-slate-200 bg-white p-3">
+              <article className="rounded-lg border border-slate-200/90 bg-slate-50/50 p-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
                   Input
                 </p>
@@ -151,7 +151,7 @@ export function ResponsePanel({
                 onCopy={onCopy}
               />
 
-              <article className="rounded-xl border border-slate-200 bg-white p-3">
+              <article className="rounded-lg border border-slate-200/90 bg-slate-50/50 p-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
                   Notes
                 </p>

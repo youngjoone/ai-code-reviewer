@@ -35,7 +35,7 @@ export function WorkspacePanel({
   generateForm,
 }: WorkspacePanelProps) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_8px_28px_rgba(15,23,42,0.05)]">
+    <section className="border-b border-slate-200 pb-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
@@ -47,7 +47,7 @@ export function WorkspacePanel({
         </div>
 
         <div className="flex flex-col gap-2 sm:items-end">
-          <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
             <button
               type="button"
               aria-pressed={mode === "review"}
