@@ -35,6 +35,46 @@ function safeLineCount(code: string): number {
   return normalized ? normalized.split("\n").length : 0;
 }
 
+function extensionForLanguage(language: string): string | null {
+  const normalized = language.trim().toLowerCase();
+  if (normalized === "typescript" || normalized === "ts") {
+    return "ts";
+  }
+  if (normalized === "javascript" || normalized === "js") {
+    return "js";
+  }
+  if (normalized === "python" || normalized === "py") {
+    return "py";
+  }
+  if (normalized === "java") {
+    return "java";
+  }
+  if (normalized === "kotlin" || normalized === "kt") {
+    return "kt";
+  }
+  return null;
+}
+
+function inferLanguageFromFilename(filename: string): string | null {
+  const normalized = filename.trim().toLowerCase();
+  if (normalized.endsWith(".ts") || normalized.endsWith(".tsx")) {
+    return "typescript";
+  }
+  if (normalized.endsWith(".js") || normalized.endsWith(".jsx")) {
+    return "javascript";
+  }
+  if (normalized.endsWith(".py")) {
+    return "python";
+  }
+  if (normalized.endsWith(".java")) {
+    return "java";
+  }
+  if (normalized.endsWith(".kt")) {
+    return "kotlin";
+  }
+  return null;
+}
+
 export async function GET() {
   const payload = reviewHealthResponseSchema.parse({
     ok: true,
@@ -65,10 +105,17 @@ export async function POST(request: Request) {
   }
 
   const code = parsedBody.data.code;
-  const language = parsedBody.data.language ?? "typescript";
+  const requestedLanguage = parsedBody.data.language?.trim();
+  const requestedFilename = parsedBody.data.filename?.trim();
+  const fallbackExtension =
+    requestedLanguage ? extensionForLanguage(requestedLanguage) : null;
+  const filename =
+    requestedFilename ||
+    (fallbackExtension ? `snippet.${fallbackExtension}` : "snippet.txt");
+  const language =
+    requestedLanguage || inferLanguageFromFilename(filename) || "plaintext";
   const responseLanguage =
     parsedBody.data.responseLanguage ?? responseLanguageSchema.enum.ko;
-  const filename = parsedBody.data.filename ?? "snippet.ts";
   const lineCount = safeLineCount(code);
 
   try {

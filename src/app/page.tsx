@@ -42,6 +42,14 @@ const GENERATE_STYLE_LABEL: Record<GenerateStyle, string> = {
   explain: "설명 포함",
 };
 
+const REVIEW_LANGUAGE_EXTENSION: Record<GenerateLanguage, string> = {
+  typescript: "ts",
+  javascript: "js",
+  python: "py",
+  java: "java",
+  kotlin: "kt",
+};
+
 const RESPONSE_LANGUAGE_LABEL: Record<ResponseLanguage, string> = {
   ko: "한국어",
   en: "English",
@@ -291,10 +299,38 @@ function highlightCodeToHtml(code: string, language: string): string {
   return highlighted;
 }
 
+function defaultFilenameForReviewLanguage(language: GenerateLanguage): string {
+  return `snippet.${REVIEW_LANGUAGE_EXTENSION[language]}`;
+}
+
+function inferReviewLanguageFromFilename(filename: string): GenerateLanguage | null {
+  const normalized = filename.trim().toLowerCase();
+  if (normalized.endsWith(".ts") || normalized.endsWith(".tsx")) {
+    return "typescript";
+  }
+  if (normalized.endsWith(".js") || normalized.endsWith(".jsx")) {
+    return "javascript";
+  }
+  if (normalized.endsWith(".py")) {
+    return "python";
+  }
+  if (normalized.endsWith(".java")) {
+    return "java";
+  }
+  if (normalized.endsWith(".kt")) {
+    return "kotlin";
+  }
+  return null;
+}
+
 export default function Home() {
   const [mode, setMode] = useState<"review" | "generate">("review");
   const [reviewCode, setReviewCode] = useState("");
-  const [reviewFilename, setReviewFilename] = useState("snippet.ts");
+  const [reviewLanguage, setReviewLanguage] =
+    useState<GenerateLanguage>("typescript");
+  const [reviewFilename, setReviewFilename] = useState(
+    defaultFilenameForReviewLanguage("typescript")
+  );
   const [generatePrompt, setGeneratePrompt] = useState("");
   const [generateLanguage, setGenerateLanguage] =
     useState<GenerateLanguage>("typescript");
@@ -363,10 +399,12 @@ export default function Home() {
     setErrorMessage(null);
 
     try {
+      const filename =
+        reviewFilename.trim() || defaultFilenameForReviewLanguage(reviewLanguage);
       const parsedPayload = reviewRequestSchema.safeParse({
         code: reviewCode,
-        filename: reviewFilename,
-        language: "typescript",
+        filename,
+        language: reviewLanguage,
         responseLanguage,
       });
 
@@ -430,7 +468,23 @@ export default function Home() {
 
     const text = await file.text();
     setReviewFilename(file.name);
+    const inferredLanguage = inferReviewLanguageFromFilename(file.name);
+    if (inferredLanguage) {
+      setReviewLanguage(inferredLanguage);
+    }
     setReviewCode(text);
+  }
+
+  function handleReviewLanguageChange(nextLanguage: GenerateLanguage) {
+    setReviewLanguage(nextLanguage);
+    setReviewFilename((prevFilename) => {
+      const normalized = prevFilename.trim().toLowerCase();
+      const isDefaultSnippet = normalized.startsWith("snippet.");
+      if (!normalized || isDefaultSnippet) {
+        return defaultFilenameForReviewLanguage(nextLanguage);
+      }
+      return prevFilename;
+    });
   }
 
   async function copyToClipboard(text: string, key: string) {
@@ -611,7 +665,9 @@ export default function Home() {
                     className="block rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600"
                   >
                     <p className="font-medium text-slate-800">파일 업로드 (선택)</p>
-                    <p className="mt-1">`.ts`, `.tsx`, `.js`, `.py` 파일을 올리세요.</p>
+                    <p className="mt-1">
+                      `.ts`, `.tsx`, `.js`, `.py`, `.java`, `.kt` 파일을 올리세요.
+                    </p>
                     <input
                       id="review-file"
                       name="review-file"
@@ -621,6 +677,33 @@ export default function Home() {
                       className="mt-3 block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700"
                     />
                   </label>
+
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <input
+                      type="text"
+                      name="review-filename"
+                      value={reviewFilename}
+                      onChange={(event) => setReviewFilename(event.target.value)}
+                      placeholder="파일명 (예: snippet.java)"
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition placeholder:text-slate-400 focus:ring-4"
+                    />
+                    <select
+                      name="review-language"
+                      value={reviewLanguage}
+                      onChange={(event) =>
+                        handleReviewLanguageChange(
+                          event.target.value as GenerateLanguage
+                        )
+                      }
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition focus:ring-4"
+                    >
+                      {GENERATE_LANGUAGES.map((language) => (
+                        <option key={language} value={language}>
+                          {GENERATE_LANGUAGE_LABEL[language]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
                   <label htmlFor="review-code" className="mt-4 block text-sm">
                     <span className="font-medium text-slate-800">코드 직접 입력</span>
@@ -636,7 +719,7 @@ export default function Home() {
                   </label>
 
                   <p className="mt-2 text-xs text-slate-500">
-                    현재 파일명: {reviewFilename}
+                    현재 파일명: {reviewFilename || defaultFilenameForReviewLanguage(reviewLanguage)}
                   </p>
 
                   <button
