@@ -34,6 +34,19 @@ export type LlmProvider = {
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const GEMINI_FALLBACK_MODEL = "gemini-2.5-flash";
+const GEMINI_RETRY_DELAY_MS = 3_000;
+const GEMINI_MAX_ATTEMPTS = 3;
+const GEMINI_TIMEOUT_MS = 20_000;
+
+class GeminiRequestError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable = false) {
+    super(message);
+    this.name = "GeminiRequestError";
+    this.retryable = retryable;
+  }
+}
 
 function readLlmProvider(): LlmProviderName {
   const provider = process.env.LLM_PROVIDER?.trim().toLowerCase();
@@ -131,6 +144,72 @@ function getTextFromGeminiResponse(payload: unknown): string {
   return text;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof GeminiRequestError) {
+    return error.retryable;
+  }
+
+  if (error instanceof Error && error.name === "AbortError") {
+    return true;
+  }
+
+  if (error instanceof TypeError) {
+    return true;
+  }
+
+  return false;
+}
+
+async function fetchGeminiPayload(url: string, prompt: string): Promise<unknown> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.2,
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const maybeError = (payload as { error?: { message?: unknown } } | null)
+        ?.error;
+      const message =
+        maybeError && typeof maybeError.message === "string"
+          ? maybeError.message
+          : `HTTP ${response.status}`;
+      const retryable = response.status === 429 || response.status >= 500;
+      throw new GeminiRequestError(`Gemini API error: ${message}`, retryable);
+    }
+
+    return payload;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function geminiJsonRequest<T>(
   schema: z.ZodType<T>,
   prompt: string
@@ -140,48 +219,39 @@ async function geminiJsonRequest<T>(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.2,
-      },
-    }),
-  });
+  for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const payload = await fetchGeminiPayload(url, prompt);
+      const text = getTextFromGeminiResponse(payload);
 
-  const payload: unknown = await response.json();
-  if (!response.ok) {
-    const maybeError = (payload as { error?: { message?: unknown } }).error;
-    if (maybeError && typeof maybeError.message === "string") {
-      throw new Error(`Gemini API error: ${maybeError.message}`);
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(text);
+      } catch {
+        throw new Error("Gemini returned non-JSON output");
+      }
+
+      const parsed = schema.safeParse(parsedJson);
+      if (!parsed.success) {
+        const message = parsed.error.issues
+          .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+          .join(", ");
+        throw new Error(`Gemini output schema mismatch: ${message}`);
+      }
+
+      return parsed.data;
+    } catch (error) {
+      const canRetry = isRetryableError(error);
+      const hasMoreAttempts = attempt < GEMINI_MAX_ATTEMPTS;
+      if (!canRetry || !hasMoreAttempts) {
+        throw error;
+      }
+
+      await delay(GEMINI_RETRY_DELAY_MS);
     }
-
-    throw new Error(`Gemini API error: HTTP ${response.status}`);
   }
 
-  const text = getTextFromGeminiResponse(payload);
-
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(text);
-  } catch {
-    throw new Error("Gemini returned non-JSON output");
-  }
-
-  const parsed = schema.safeParse(parsedJson);
-  if (!parsed.success) {
-    const message = parsed.error.issues
-      .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
-      .join(", ");
-    throw new Error(`Gemini output schema mismatch: ${message}`);
-  }
-
-  return parsed.data;
+  throw new Error("Gemini request failed after retries");
 }
 
 function createGeminiProvider(): LlmProvider {
