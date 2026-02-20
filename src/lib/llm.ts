@@ -11,10 +11,14 @@ import {
 
 type LlmProviderName = "gemini";
 
-type ReviewInput = {
+type ReviewInputFile = {
   filename: string;
   language: string;
   code: string;
+};
+
+type ReviewInput = {
+  files: ReviewInputFile[];
   responseLanguage: ResponseLanguage;
   signal?: AbortSignal;
 };
@@ -80,18 +84,30 @@ function responseLanguageInstruction(responseLanguage: ResponseLanguage): string
 }
 
 function buildReviewPrompt(input: ReviewInput): string {
+  const filesText = input.files
+    .map((file, index) =>
+      [
+        `--- FILE ${index + 1} START ---`,
+        `filename: ${file.filename}`,
+        `language: ${file.language}`,
+        "code:",
+        file.code,
+        `--- FILE ${index + 1} END ---`,
+      ].join("\n")
+    )
+    .join("\n\n");
+
   return [
     "You are a senior software engineer.",
-    "Analyze the code and return ONLY valid JSON.",
+    "Analyze the codebase context across all files and return ONLY valid JSON.",
+    "Include cross-file issues when relevant.",
     responseLanguageInstruction(input.responseLanguage),
     "JSON schema:",
     '{ "summary": "string", "issues": [{ "id": "string", "severity": "low|medium|high", "title": "string", "message": "string", "line": 1 }], "refactoredCode": "string", "suggestedTests": ["string"] }',
     "",
-    `filename: ${input.filename}`,
-    `language: ${input.language}`,
+    `fileCount: ${input.files.length}`,
     "",
-    "code:",
-    input.code,
+    filesText,
   ].join("\n");
 }
 

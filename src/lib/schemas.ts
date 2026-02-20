@@ -28,11 +28,28 @@ export const reviewIssueSchema = z.object({
   line: z.number().int().positive(),
 });
 
+export const reviewInputFileSchema = z.object({
+  filename: z.string().trim().min(1, "`files[].filename` must not be empty"),
+  code: z.string().trim().min(1, "`files[].code` must not be empty"),
+  language: z.string().trim().min(1, "`files[].language` must not be empty").optional(),
+});
+
 export const reviewRequestSchema = z.object({
-  code: z.string().trim().min(1, "`code` is required"),
+  code: z.string().trim().min(1, "`code` is required").optional(),
   filename: z.string().trim().min(1, "`filename` must not be empty").optional(),
   language: z.string().trim().min(1, "`language` must not be empty").optional(),
+  files: z.array(reviewInputFileSchema).min(1, "`files` must have at least one item").optional(),
   responseLanguage: responseLanguageSchema.optional(),
+}).superRefine((value, ctx) => {
+  const hasInlineCode = typeof value.code === "string" && value.code.length > 0;
+  const hasFiles = Array.isArray(value.files) && value.files.length > 0;
+  if (!hasInlineCode && !hasFiles) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "`code` or `files` is required",
+      path: ["code"],
+    });
+  }
 });
 
 export const reviewResponseSchema = z.object({
@@ -43,6 +60,8 @@ export const reviewResponseSchema = z.object({
     language: z.string(),
     responseLanguage: responseLanguageSchema,
     lineCount: z.number().int().nonnegative(),
+    fileCount: z.number().int().positive(),
+    totalLineCount: z.number().int().nonnegative(),
   }),
   summary: z.string(),
   issues: z.array(reviewIssueSchema),

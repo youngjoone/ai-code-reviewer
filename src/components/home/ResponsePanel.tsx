@@ -62,7 +62,13 @@ export function ResponsePanel({
                     응답: {RESPONSE_LANGUAGE_LABEL[result.input.responseLanguage]}
                   </span>
                   <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
-                    라인: {result.input.lineCount}
+                    파일 수: {result.input.fileCount}
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
+                    총 라인: {result.input.totalLineCount}
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
+                    대표 라인: {result.input.lineCount}
                   </span>
                 </div>
               </article>

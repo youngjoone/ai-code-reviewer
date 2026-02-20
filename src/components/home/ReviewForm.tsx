@@ -8,15 +8,24 @@ import {
   GENERATE_LANGUAGE_LABEL,
 } from "@/components/home/config";
 
+type ReviewSelectedFile = {
+  id: string;
+  filename: string;
+  language: string;
+  lineCount: number;
+};
+
 export type ReviewFormProps = {
   reviewCode: string;
   reviewFilename: string;
   reviewLanguage: GenerateLanguage;
+  reviewFiles: ReviewSelectedFile[];
   isSubmitting: boolean;
   onReviewCodeChange: (value: string) => void;
   onReviewFilenameChange: (value: string) => void;
   onReviewLanguageChange: (language: GenerateLanguage) => void;
-  onReviewFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onReviewFilesChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onReviewFileRemove: (fileId: string) => void;
   onSubmit: () => void;
 };
 
@@ -24,11 +33,13 @@ export function ReviewForm({
   reviewCode,
   reviewFilename,
   reviewLanguage,
+  reviewFiles,
   isSubmitting,
   onReviewCodeChange,
   onReviewFilenameChange,
   onReviewLanguageChange,
-  onReviewFileChange,
+  onReviewFilesChange,
+  onReviewFileRemove,
   onSubmit,
 }: ReviewFormProps) {
   return (
@@ -37,7 +48,7 @@ export function ReviewForm({
         htmlFor="review-file"
         className="block rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600"
       >
-        <p className="font-medium text-slate-800">파일 업로드 (선택)</p>
+        <p className="font-medium text-slate-800">파일 업로드 (복수 선택 가능)</p>
         <p className="mt-1">
           `.ts`, `.tsx`, `.js`, `.py`, `.java`, `.kt` 파일을 올리세요.
         </p>
@@ -45,11 +56,37 @@ export function ReviewForm({
           id="review-file"
           name="review-file"
           type="file"
+          multiple
           accept=".ts,.tsx,.js,.jsx,.py,.java,.kt,.go,.rs,.cpp,.c,.cs"
-          onChange={onReviewFileChange}
+          onChange={onReviewFilesChange}
           className="mt-3 block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700"
         />
       </label>
+
+      {reviewFiles.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {reviewFiles.map((file) => (
+            <li
+              key={file.id}
+              className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"
+            >
+              <div>
+                <p className="font-medium text-slate-800">{file.filename}</p>
+                <p className="text-slate-500">
+                  {file.language} · {file.lineCount} lines
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onReviewFileRemove(file.id)}
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 transition hover:bg-slate-100"
+              >
+                제거
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <input
@@ -77,7 +114,7 @@ export function ReviewForm({
       </div>
 
       <label htmlFor="review-code" className="mt-4 block text-sm">
-        <span className="font-medium text-slate-800">코드 직접 입력</span>
+        <span className="font-medium text-slate-800">코드 직접 입력 (선택)</span>
         <textarea
           id="review-code"
           name="review-code"

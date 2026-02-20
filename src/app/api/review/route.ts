@@ -9,6 +9,16 @@ import {
 } from "@/lib/schemas";
 import { getLlmProvider } from "@/lib/llm";
 
+const REVIEW_MAX_FILES = 12;
+const REVIEW_MAX_TOTAL_CHARS = 80_000;
+
+type NormalizedReviewFile = {
+  filename: string;
+  language: string;
+  code: string;
+  lineCount: number;
+};
+
 function zodIssuesToStrings(error: z.ZodError): string[] {
   return error.issues.map((issue) => {
     const path = issue.path.length > 0 ? issue.path.join(".") : "body";
@@ -75,6 +85,25 @@ function inferLanguageFromFilename(filename: string): string | null {
   return null;
 }
 
+function normalizeReviewFile(
+  filename: string,
+  code: string,
+  preferredLanguage?: string
+): NormalizedReviewFile {
+  const normalizedFilename = filename.trim() || "snippet.txt";
+  const normalizedLanguage =
+    preferredLanguage?.trim() ||
+    inferLanguageFromFilename(normalizedFilename) ||
+    "plaintext";
+
+  return {
+    filename: normalizedFilename,
+    language: normalizedLanguage,
+    code,
+    lineCount: safeLineCount(code),
+  };
+}
+
 export async function GET() {
   const payload = reviewHealthResponseSchema.parse({
     ok: true,
@@ -104,26 +133,55 @@ export async function POST(request: Request) {
     );
   }
 
-  const code = parsedBody.data.code;
-  const requestedLanguage = parsedBody.data.language?.trim();
-  const requestedFilename = parsedBody.data.filename?.trim();
-  const fallbackExtension =
-    requestedLanguage ? extensionForLanguage(requestedLanguage) : null;
-  const filename =
-    requestedFilename ||
-    (fallbackExtension ? `snippet.${fallbackExtension}` : "snippet.txt");
-  const language =
-    requestedLanguage || inferLanguageFromFilename(filename) || "plaintext";
+  const uploadedFiles = (parsedBody.data.files ?? []).map((file) =>
+    normalizeReviewFile(file.filename, file.code, file.language)
+  );
+  const inlineCode = parsedBody.data.code;
+  let inlineFile: NormalizedReviewFile | null = null;
+  if (inlineCode) {
+    const requestedLanguage = parsedBody.data.language?.trim();
+    const requestedFilename = parsedBody.data.filename?.trim();
+    const fallbackExtension =
+      requestedLanguage ? extensionForLanguage(requestedLanguage) : null;
+    const filename =
+      requestedFilename ||
+      (fallbackExtension ? `snippet.${fallbackExtension}` : "snippet.txt");
+    inlineFile = normalizeReviewFile(filename, inlineCode, requestedLanguage);
+  }
+
+  const allFiles = inlineFile ? [...uploadedFiles, inlineFile] : uploadedFiles;
+  if (allFiles.length === 0) {
+    return createErrorResponse("Invalid request body", 400, [
+      "`code` or `files` is required",
+    ]);
+  }
+
+  if (allFiles.length > REVIEW_MAX_FILES) {
+    return createErrorResponse("Invalid request body", 400, [
+      `Too many files. Maximum is ${REVIEW_MAX_FILES}.`,
+    ]);
+  }
+
+  const totalChars = allFiles.reduce((sum, file) => sum + file.code.length, 0);
+  if (totalChars > REVIEW_MAX_TOTAL_CHARS) {
+    return createErrorResponse("Invalid request body", 400, [
+      `Total code size is too large. Maximum is ${REVIEW_MAX_TOTAL_CHARS} characters.`,
+    ]);
+  }
+
+  const primaryFile = inlineFile ?? allFiles[0];
+  const totalLineCount = allFiles.reduce((sum, file) => sum + file.lineCount, 0);
   const responseLanguage =
     parsedBody.data.responseLanguage ?? responseLanguageSchema.enum.ko;
-  const lineCount = safeLineCount(code);
 
   try {
     const provider = getLlmProvider();
     const parsed = await provider.review({
-      filename,
-      language,
-      code,
+      files: allFiles.map((file) => ({
+        filename: file.filename,
+        language: file.language,
+        code: file.code,
+      })),
       responseLanguage,
       signal: request.signal,
     });
@@ -132,10 +190,12 @@ export async function POST(request: Request) {
       ok: true,
       mode: "review",
       input: {
-        filename,
-        language,
+        filename: primaryFile.filename,
+        language: primaryFile.language,
         responseLanguage,
-        lineCount,
+        lineCount: primaryFile.lineCount,
+        fileCount: allFiles.length,
+        totalLineCount,
       },
       summary: parsed.summary,
       issues: parsed.issues,

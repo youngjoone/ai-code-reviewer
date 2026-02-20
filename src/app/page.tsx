@@ -21,6 +21,14 @@ import {
   type ResponseLanguage,
 } from "@/lib/schemas";
 
+type SelectedReviewFile = {
+  id: string;
+  filename: string;
+  language: string;
+  code: string;
+  lineCount: number;
+};
+
 function extractErrorMessage(data: unknown): string {
   const parsedError = apiErrorResponseSchema.safeParse(data);
   if (!parsedError.success) {
@@ -32,6 +40,11 @@ function extractErrorMessage(data: unknown): string {
   }
 
   return `${parsedError.data.error}: ${parsedError.data.details.join(", ")}`;
+}
+
+function safeLineCount(code: string): number {
+  const normalized = code.replace(/\r\n/g, "\n");
+  return normalized ? normalized.split("\n").length : 0;
 }
 
 async function postJson<TResponse>(
@@ -71,6 +84,7 @@ export default function Home() {
   const [reviewFilename, setReviewFilename] = useState(
     defaultFilenameForReviewLanguage("typescript")
   );
+  const [reviewFiles, setReviewFiles] = useState<SelectedReviewFile[]>([]);
   const [generatePrompt, setGeneratePrompt] = useState("");
   const [generateLanguage, setGenerateLanguage] =
     useState<GenerateLanguage>("typescript");
@@ -98,12 +112,21 @@ export default function Home() {
     requestAbortControllerRef.current = controller;
 
     try {
+      const hasInlineCode = reviewCode.trim().length > 0;
       const filename =
         reviewFilename.trim() || defaultFilenameForReviewLanguage(reviewLanguage);
       const parsedPayload = reviewRequestSchema.safeParse({
-        code: reviewCode,
-        filename,
-        language: reviewLanguage,
+        code: hasInlineCode ? reviewCode : undefined,
+        filename: hasInlineCode ? filename : undefined,
+        language: hasInlineCode ? reviewLanguage : undefined,
+        files:
+          reviewFiles.length > 0
+            ? reviewFiles.map((file) => ({
+                filename: file.filename,
+                language: file.language,
+                code: file.code,
+              }))
+            : undefined,
         responseLanguage,
       });
 
@@ -182,19 +205,42 @@ export default function Home() {
     }
   }
 
-  async function handleReviewFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) {
+  async function handleReviewFilesChange(event: ChangeEvent<HTMLInputElement>) {
+    const fileList = event.target.files;
+    if (!fileList || fileList.length === 0) {
       return;
     }
 
-    const text = await file.text();
-    setReviewFilename(file.name);
-    const inferredLanguage = inferReviewLanguageFromFilename(file.name);
-    if (inferredLanguage) {
-      setReviewLanguage(inferredLanguage);
-    }
-    setReviewCode(text);
+    const files = Array.from(fileList);
+    const loadedFiles = await Promise.all(
+      files.map(async (file, index) => {
+        const code = await file.text();
+        const inferredLanguage = inferReviewLanguageFromFilename(file.name);
+        return {
+          id: `${file.name}-${file.lastModified}-${file.size}-${index}`,
+          filename: file.name,
+          language: inferredLanguage ?? "plaintext",
+          code,
+          lineCount: safeLineCount(code),
+        };
+      })
+    );
+
+    setReviewFiles((prevFiles) => {
+      const byFilename = new Map(
+        prevFiles.map((file) => [file.filename.toLowerCase(), file])
+      );
+      for (const file of loadedFiles) {
+        byFilename.set(file.filename.toLowerCase(), file);
+      }
+      return Array.from(byFilename.values());
+    });
+
+    event.target.value = "";
+  }
+
+  function handleReviewFileRemove(fileId: string) {
+    setReviewFiles((prevFiles) => prevFiles.filter((file) => file.id !== fileId));
   }
 
   function handleReviewLanguageChange(nextLanguage: GenerateLanguage) {
@@ -256,11 +302,18 @@ export default function Home() {
                 reviewCode,
                 reviewFilename,
                 reviewLanguage,
+                reviewFiles: reviewFiles.map((file) => ({
+                  id: file.id,
+                  filename: file.filename,
+                  language: file.language,
+                  lineCount: file.lineCount,
+                })),
                 isSubmitting,
                 onReviewCodeChange: setReviewCode,
                 onReviewFilenameChange: setReviewFilename,
                 onReviewLanguageChange: handleReviewLanguageChange,
-                onReviewFileChange: handleReviewFileChange,
+                onReviewFilesChange: handleReviewFilesChange,
+                onReviewFileRemove: handleReviewFileRemove,
                 onSubmit: handleReviewSubmit,
               }}
               generateForm={{
