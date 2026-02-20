@@ -8,11 +8,13 @@ import {
   generateResponseSchema,
   GENERATE_LANGUAGES,
   GENERATE_STYLES,
+  RESPONSE_LANGUAGES,
   reviewRequestSchema,
   reviewResponseSchema,
   type GenerateLanguage,
   type GenerateResponse,
   type GenerateStyle,
+  type ResponseLanguage,
   type ReviewResponse,
 } from "@/lib/schemas";
 
@@ -29,6 +31,11 @@ const GENERATE_STYLE_LABEL: Record<GenerateStyle, string> = {
   clean: "깔끔한 구현",
   fast: "성능 우선",
   explain: "설명 포함",
+};
+
+const RESPONSE_LANGUAGE_LABEL: Record<ResponseLanguage, string> = {
+  ko: "한국어",
+  en: "English",
 };
 
 const REVIEW_SEVERITY_LABEL: Record<ReviewSeverity, string> = {
@@ -51,6 +58,8 @@ export default function Home() {
   const [generateLanguage, setGenerateLanguage] =
     useState<GenerateLanguage>("typescript");
   const [generateStyle, setGenerateStyle] = useState<GenerateStyle>("clean");
+  const [responseLanguage, setResponseLanguage] =
+    useState<ResponseLanguage>("ko");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResult | null>(null);
@@ -116,6 +125,7 @@ export default function Home() {
         code: reviewCode,
         filename: reviewFilename,
         language: "typescript",
+        responseLanguage,
       });
 
       if (!parsedPayload.success) {
@@ -147,6 +157,7 @@ export default function Home() {
         prompt: generatePrompt,
         language: generateLanguage,
         style: generateStyle,
+        responseLanguage,
       });
 
       if (!parsedPayload.success) {
@@ -264,7 +275,7 @@ export default function Home() {
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_8px_28px_rgba(15,23,42,0.05)]">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
                     Workspace Mode
@@ -274,31 +285,51 @@ export default function Home() {
                   </h3>
                 </div>
 
-                <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
-                  <button
-                    type="button"
-                    aria-pressed={mode === "review"}
-                    onClick={() => setMode("review")}
-                    className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                      mode === "review"
-                        ? "bg-slate-900 text-white shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    코드 분석
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={mode === "generate"}
-                    onClick={() => setMode("generate")}
-                    className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                      mode === "generate"
-                        ? "bg-slate-900 text-white shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    문장 → 코드
-                  </button>
+                <div className="flex flex-col gap-2 sm:items-end">
+                  <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
+                    <button
+                      type="button"
+                      aria-pressed={mode === "review"}
+                      onClick={() => setMode("review")}
+                      className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                        mode === "review"
+                          ? "bg-slate-900 text-white shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      코드 분석
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={mode === "generate"}
+                      onClick={() => setMode("generate")}
+                      className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                        mode === "generate"
+                          ? "bg-slate-900 text-white shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      문장 → 코드
+                    </button>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-slate-600">
+                    <span>응답 언어</span>
+                    <select
+                      name="response-language"
+                      value={responseLanguage}
+                      onChange={(event) =>
+                        setResponseLanguage(event.target.value as ResponseLanguage)
+                      }
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 outline-none ring-slate-900/10 transition focus:ring-4"
+                    >
+                      {RESPONSE_LANGUAGES.map((language) => (
+                        <option key={language} value={language}>
+                          {RESPONSE_LANGUAGE_LABEL[language]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               </div>
 
@@ -445,6 +476,9 @@ export default function Home() {
                             언어: {result.input.language}
                           </span>
                           <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
+                            응답: {RESPONSE_LANGUAGE_LABEL[result.input.responseLanguage]}
+                          </span>
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
                             라인: {result.input.lineCount}
                           </span>
                         </div>
@@ -517,6 +551,9 @@ export default function Home() {
                           </span>
                           <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
                             스타일: {result.input.style}
+                          </span>
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
+                            응답: {RESPONSE_LANGUAGE_LABEL[result.input.responseLanguage]}
                           </span>
                           <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
                             프롬프트 길이: {result.input.promptLength}

@@ -5,6 +5,7 @@ import {
   type GenerateLanguage,
   type GenerateLlmOutput,
   type GenerateStyle,
+  type ResponseLanguage,
   type ReviewLlmOutput,
 } from "@/lib/schemas";
 
@@ -14,12 +15,14 @@ type ReviewInput = {
   filename: string;
   language: string;
   code: string;
+  responseLanguage: ResponseLanguage;
 };
 
 type GenerateInput = {
   prompt: string;
   language: GenerateLanguage;
   style: GenerateStyle;
+  responseLanguage: ResponseLanguage;
 };
 
 export type LlmProvider = {
@@ -53,10 +56,19 @@ function getGeminiConfig() {
   return { apiKey, model };
 }
 
+function responseLanguageInstruction(responseLanguage: ResponseLanguage): string {
+  if (responseLanguage === "ko") {
+    return "Write all natural-language fields in Korean.";
+  }
+
+  return "Write all natural-language fields in English.";
+}
+
 function buildReviewPrompt(input: ReviewInput): string {
   return [
     "You are a senior software engineer.",
     "Analyze the code and return ONLY valid JSON.",
+    responseLanguageInstruction(input.responseLanguage),
     "JSON schema:",
     '{ "summary": "string", "issues": [{ "id": "string", "severity": "low|medium|high", "title": "string", "message": "string", "line": 1 }], "refactoredCode": "string", "suggestedTests": ["string"] }',
     "",
@@ -72,6 +84,7 @@ function buildGeneratePrompt(input: GenerateInput): string {
   return [
     "You are a practical coding assistant.",
     "Generate production-quality code and return ONLY valid JSON.",
+    responseLanguageInstruction(input.responseLanguage),
     "JSON schema:",
     '{ "summary": "string", "code": "string", "notes": ["string"] }',
     "",

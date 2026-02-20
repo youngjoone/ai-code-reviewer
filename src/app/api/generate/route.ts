@@ -7,6 +7,7 @@ import {
   generateRequestSchema,
   generateResponseSchema,
   generateStyleSchema,
+  responseLanguageSchema,
 } from "@/lib/schemas";
 import { getLlmProvider } from "@/lib/llm";
 
@@ -63,10 +64,17 @@ export async function POST(request: Request) {
   const prompt = parsedBody.data.prompt;
   const language = parsedBody.data.language ?? generateLanguageSchema.enum.typescript;
   const style = parsedBody.data.style ?? generateStyleSchema.enum.clean;
+  const responseLanguage =
+    parsedBody.data.responseLanguage ?? responseLanguageSchema.enum.ko;
 
   try {
     const provider = getLlmProvider();
-    const parsed = await provider.generate({ prompt, language, style });
+    const parsed = await provider.generate({
+      prompt,
+      language,
+      style,
+      responseLanguage,
+    });
 
     const responsePayloadResult = generateResponseSchema.safeParse({
       ok: true,
@@ -74,6 +82,7 @@ export async function POST(request: Request) {
       input: {
         language,
         style,
+        responseLanguage,
         promptLength: prompt.length,
       },
       summary: parsed.summary,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   apiErrorResponseSchema,
+  responseLanguageSchema,
   reviewHealthResponseSchema,
   reviewRequestSchema,
   reviewResponseSchema,
@@ -65,12 +66,19 @@ export async function POST(request: Request) {
 
   const code = parsedBody.data.code;
   const language = parsedBody.data.language ?? "typescript";
+  const responseLanguage =
+    parsedBody.data.responseLanguage ?? responseLanguageSchema.enum.ko;
   const filename = parsedBody.data.filename ?? "snippet.ts";
   const lineCount = safeLineCount(code);
 
   try {
     const provider = getLlmProvider();
-    const parsed = await provider.review({ filename, language, code });
+    const parsed = await provider.review({
+      filename,
+      language,
+      code,
+      responseLanguage,
+    });
 
     const responsePayloadResult = reviewResponseSchema.safeParse({
       ok: true,
@@ -78,6 +86,7 @@ export async function POST(request: Request) {
       input: {
         filename,
         language,
+        responseLanguage,
         lineCount,
       },
       summary: parsed.summary,
