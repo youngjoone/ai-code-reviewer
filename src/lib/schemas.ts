@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-export const GENERATE_LANGUAGES = ["typescript", "javascript", "python"] as const;
+export const GENERATE_LANGUAGES = [
+  "typescript",
+  "javascript",
+  "python",
+  "java",
+  "kotlin",
+] as const;
 export const GENERATE_STYLES = ["clean", "fast", "explain"] as const;
 export const RESPONSE_LANGUAGES = ["ko", "en"] as const;
 

@@ -25,6 +25,8 @@ const GENERATE_LANGUAGE_LABEL: Record<GenerateLanguage, string> = {
   typescript: "TypeScript",
   javascript: "JavaScript",
   python: "Python",
+  java: "Java",
+  kotlin: "Kotlin",
 };
 
 const GENERATE_STYLE_LABEL: Record<GenerateStyle, string> = {
