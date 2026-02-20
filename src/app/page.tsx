@@ -1,9 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
+
+type JsonObject = Record<string, unknown>;
+
+const GENERATE_LANGUAGES = ["typescript", "javascript", "python"] as const;
+type GenerateLanguage = (typeof GENERATE_LANGUAGES)[number];
+const GENERATE_LANGUAGE_LABEL: Record<GenerateLanguage, string> = {
+  typescript: "TypeScript",
+  javascript: "JavaScript",
+  python: "Python",
+};
+
+const GENERATE_STYLES = ["clean", "fast", "explain"] as const;
+type GenerateStyle = (typeof GENERATE_STYLES)[number];
+const GENERATE_STYLE_LABEL: Record<GenerateStyle, string> = {
+  clean: "깔끔한 구현",
+  fast: "성능 우선",
+  explain: "설명 포함",
+};
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null;
+}
 
 export default function Home() {
   const [mode, setMode] = useState<"review" | "generate">("review");
+  const [reviewCode, setReviewCode] = useState("");
+  const [reviewFilename, setReviewFilename] = useState("snippet.ts");
+  const [generatePrompt, setGeneratePrompt] = useState("");
+  const [generateLanguage, setGenerateLanguage] =
+    useState<GenerateLanguage>("typescript");
+  const [generateStyle, setGenerateStyle] = useState<GenerateStyle>("clean");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [result, setResult] = useState<JsonObject | null>(null);
 
   const categories = [
     { name: "코드 리뷰", count: 12 },
@@ -16,6 +47,80 @@ export default function Home() {
     { title: "알고리즘 문제 풀이 생성", time: "10분 전" },
     { title: "API 성능 개선 제안", time: "어제" },
   ];
+
+  async function postJson(url: string, payload: JsonObject): Promise<JsonObject> {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data: unknown = await response.json();
+    if (!isJsonObject(data)) {
+      throw new Error("Invalid API response");
+    }
+
+    if (!response.ok || data.ok === false) {
+      const message =
+        typeof data.error === "string" ? data.error : "요청 처리에 실패했습니다.";
+      throw new Error(message);
+    }
+
+    return data;
+  }
+
+  async function handleReviewSubmit() {
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    try {
+      const data = await postJson("/api/review", {
+        code: reviewCode,
+        filename: reviewFilename,
+        language: "typescript",
+      });
+      setResult(data);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
+      setErrorMessage(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleGenerateSubmit() {
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    try {
+      const data = await postJson("/api/generate", {
+        prompt: generatePrompt,
+        language: generateLanguage,
+        style: generateStyle,
+      });
+      setResult(data);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
+      setErrorMessage(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleReviewFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const text = await file.text();
+    setReviewFilename(file.name);
+    setReviewCode(text);
+  }
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe_0%,#f8fafc_45%,#eef2ff_100%)] text-slate-900">
@@ -151,6 +256,8 @@ export default function Home() {
                       id="review-file"
                       name="review-file"
                       type="file"
+                      accept=".ts,.tsx,.js,.jsx,.py,.java,.kt,.go,.rs,.cpp,.c,.cs"
+                      onChange={handleReviewFileChange}
                       className="mt-3 block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700"
                     />
                   </label>
@@ -161,16 +268,24 @@ export default function Home() {
                       id="review-code"
                       name="review-code"
                       rows={12}
+                      value={reviewCode}
+                      onChange={(event) => setReviewCode(event.target.value)}
                       placeholder="분석할 코드를 붙여넣으세요."
                       className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition placeholder:text-slate-400 focus:ring-4"
                     />
                   </label>
 
+                  <p className="mt-2 text-xs text-slate-500">
+                    현재 파일명: {reviewFilename}
+                  </p>
+
                   <button
                     type="button"
+                    onClick={handleReviewSubmit}
+                    disabled={isSubmitting}
                     className="mt-4 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700"
                   >
-                    분석 시작
+                    {isSubmitting ? "분석 중..." : "분석 시작"}
                   </button>
                 </div>
               ) : (
@@ -183,6 +298,8 @@ export default function Home() {
                       id="problem-text"
                       name="problem-text"
                       rows={16}
+                      value={generatePrompt}
+                      onChange={(event) => setGeneratePrompt(event.target.value)}
                       placeholder="예: 정수 배열이 주어질 때 중복을 제거하고 오름차순으로 반환하는 TypeScript 함수를 작성해줘."
                       className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition placeholder:text-slate-400 focus:ring-4"
                     />
@@ -191,37 +308,71 @@ export default function Home() {
                   <div className="mt-4 grid grid-cols-2 gap-2">
                     <select
                       name="language"
-                      defaultValue="typescript"
+                      value={generateLanguage}
+                      onChange={(event) =>
+                        setGenerateLanguage(event.target.value as GenerateLanguage)
+                      }
                       className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition focus:ring-4"
                     >
-                      <option value="typescript">TypeScript</option>
-                      <option value="javascript">JavaScript</option>
-                      <option value="python">Python</option>
+                      {GENERATE_LANGUAGES.map((language) => (
+                        <option key={language} value={language}>
+                          {GENERATE_LANGUAGE_LABEL[language]}
+                        </option>
+                      ))}
                     </select>
                     <select
                       name="style"
-                      defaultValue="clean"
+                      value={generateStyle}
+                      onChange={(event) =>
+                        setGenerateStyle(event.target.value as GenerateStyle)
+                      }
                       className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition focus:ring-4"
                     >
-                      <option value="clean">깔끔한 구현</option>
-                      <option value="fast">성능 우선</option>
-                      <option value="explain">설명 포함</option>
+                      {GENERATE_STYLES.map((style) => (
+                        <option key={style} value={style}>
+                          {GENERATE_STYLE_LABEL[style]}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
                   <button
                     type="button"
+                    onClick={handleGenerateSubmit}
+                    disabled={isSubmitting}
                     className="mt-4 w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-500"
                   >
-                    코드 생성
+                    {isSubmitting ? "생성 중..." : "코드 생성"}
                   </button>
                 </div>
               )}
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white/80 p-4 text-xs leading-6 text-slate-600">
-              다음 단계 제안: `API Route` 2개(`review`, `generate`)를 만든 후 현재
-              UI의 버튼과 연결하면 최소 기능 MVP가 됩니다.
+              <div className="flex items-center justify-between">
+                <p className="font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  API Response
+                </p>
+                {isSubmitting ? (
+                  <span className="text-sky-600">요청 중...</span>
+                ) : null}
+              </div>
+
+              {errorMessage ? (
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {errorMessage}
+                </div>
+              ) : null}
+
+              {result ? (
+                <pre className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
+                  {JSON.stringify(result, null, 2)}
+                </pre>
+              ) : (
+                <p className="mt-3 text-sm text-slate-500">
+                  아직 결과가 없습니다. 위에서 분석 또는 생성을 실행해보세요.
+                </p>
+              )}
             </section>
           </div>
         </main>
