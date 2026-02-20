@@ -2,329 +2,67 @@
 
 import { useState, type ChangeEvent } from "react";
 import { type ZodType } from "zod";
+import { ResponsePanel } from "@/components/home/ResponsePanel";
+import { Sidebar } from "@/components/home/Sidebar";
+import { WorkspacePanel } from "@/components/home/WorkspacePanel";
+import {
+  defaultFilenameForReviewLanguage,
+  inferReviewLanguageFromFilename,
+} from "@/components/home/config";
+import { type ApiResult, type WorkspaceMode } from "@/components/home/types";
 import {
   apiErrorResponseSchema,
   generateRequestSchema,
   generateResponseSchema,
-  GENERATE_LANGUAGES,
-  GENERATE_STYLES,
-  RESPONSE_LANGUAGES,
   reviewRequestSchema,
   reviewResponseSchema,
   type GenerateLanguage,
-  type GenerateResponse,
   type GenerateStyle,
   type ResponseLanguage,
-  type ReviewResponse,
 } from "@/lib/schemas";
 
-type ApiResult = ReviewResponse | GenerateResponse;
-type ReviewSeverity = ReviewResponse["issues"][number]["severity"];
-type CodeLanguage =
-  | "typescript"
-  | "javascript"
-  | "python"
-  | "java"
-  | "kotlin"
-  | "plain";
+function extractErrorMessage(data: unknown): string {
+  const parsedError = apiErrorResponseSchema.safeParse(data);
+  if (!parsedError.success) {
+    return "요청 처리에 실패했습니다.";
+  }
 
-const GENERATE_LANGUAGE_LABEL: Record<GenerateLanguage, string> = {
-  typescript: "TypeScript",
-  javascript: "JavaScript",
-  python: "Python",
-  java: "Java",
-  kotlin: "Kotlin",
-};
+  if (!parsedError.data.details || parsedError.data.details.length === 0) {
+    return parsedError.data.error;
+  }
 
-const GENERATE_STYLE_LABEL: Record<GenerateStyle, string> = {
-  clean: "깔끔한 구현",
-  fast: "성능 우선",
-  explain: "설명 포함",
-};
-
-const REVIEW_LANGUAGE_EXTENSION: Record<GenerateLanguage, string> = {
-  typescript: "ts",
-  javascript: "js",
-  python: "py",
-  java: "java",
-  kotlin: "kt",
-};
-
-const RESPONSE_LANGUAGE_LABEL: Record<ResponseLanguage, string> = {
-  ko: "한국어",
-  en: "English",
-};
-
-const REVIEW_SEVERITY_LABEL: Record<ReviewSeverity, string> = {
-  high: "높음",
-  medium: "중간",
-  low: "낮음",
-};
-
-const REVIEW_SEVERITY_STYLE: Record<ReviewSeverity, string> = {
-  high: "border-red-200 bg-red-50 text-red-700",
-  medium: "border-amber-200 bg-amber-50 text-amber-700",
-  low: "border-sky-200 bg-sky-50 text-sky-700",
-};
-
-const CODE_KEYWORDS: Record<CodeLanguage, string[]> = {
-  typescript: [
-    "const",
-    "let",
-    "var",
-    "function",
-    "return",
-    "if",
-    "else",
-    "for",
-    "while",
-    "switch",
-    "case",
-    "break",
-    "continue",
-    "try",
-    "catch",
-    "finally",
-    "throw",
-    "class",
-    "extends",
-    "implements",
-    "interface",
-    "type",
-    "enum",
-    "import",
-    "export",
-    "from",
-    "new",
-    "async",
-    "await",
-    "public",
-    "private",
-    "protected",
-    "readonly",
-  ],
-  javascript: [
-    "const",
-    "let",
-    "var",
-    "function",
-    "return",
-    "if",
-    "else",
-    "for",
-    "while",
-    "switch",
-    "case",
-    "break",
-    "continue",
-    "try",
-    "catch",
-    "finally",
-    "throw",
-    "class",
-    "extends",
-    "import",
-    "export",
-    "from",
-    "new",
-    "async",
-    "await",
-  ],
-  python: [
-    "def",
-    "return",
-    "if",
-    "elif",
-    "else",
-    "for",
-    "while",
-    "try",
-    "except",
-    "finally",
-    "raise",
-    "class",
-    "import",
-    "from",
-    "as",
-    "with",
-    "pass",
-    "break",
-    "continue",
-    "lambda",
-  ],
-  java: [
-    "public",
-    "private",
-    "protected",
-    "class",
-    "interface",
-    "enum",
-    "extends",
-    "implements",
-    "static",
-    "final",
-    "void",
-    "new",
-    "return",
-    "if",
-    "else",
-    "for",
-    "while",
-    "switch",
-    "case",
-    "break",
-    "continue",
-    "try",
-    "catch",
-    "finally",
-    "throw",
-    "throws",
-    "import",
-    "package",
-  ],
-  kotlin: [
-    "fun",
-    "val",
-    "var",
-    "class",
-    "interface",
-    "object",
-    "data",
-    "sealed",
-    "enum",
-    "open",
-    "override",
-    "private",
-    "public",
-    "internal",
-    "return",
-    "if",
-    "else",
-    "when",
-    "for",
-    "while",
-    "break",
-    "continue",
-    "try",
-    "catch",
-    "finally",
-    "throw",
-    "import",
-  ],
-  plain: [],
-};
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return `${parsedError.data.error}: ${parsedError.data.details.join(", ")}`;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function normalizeCodeLanguage(language: string): CodeLanguage {
-  const normalized = language.trim().toLowerCase();
-  if (normalized === "typescript" || normalized === "ts" || normalized === "tsx") {
-    return "typescript";
-  }
-  if (normalized === "javascript" || normalized === "js" || normalized === "jsx") {
-    return "javascript";
-  }
-  if (normalized === "python" || normalized === "py") {
-    return "python";
-  }
-  if (normalized === "java") {
-    return "java";
-  }
-  if (normalized === "kotlin" || normalized === "kt") {
-    return "kotlin";
-  }
-  return "plain";
-}
-
-function protectToken(
-  source: string,
-  pattern: RegExp,
-  tokenType: "comment" | "string",
-  store: string[]
-): string {
-  return source.replace(pattern, (match) => {
-    const index = store.push(
-      `<span data-rp-token="${tokenType}">${match}</span>`
-    );
-    return `@@RP_TOKEN_${index - 1}@@`;
-  });
-}
-
-function highlightCodeToHtml(code: string, language: string): string {
-  const codeLanguage = normalizeCodeLanguage(language);
-  let highlighted = escapeHtml(code);
-  const keywords = CODE_KEYWORDS[codeLanguage];
-  const keywordPattern =
-    keywords.length > 0
-      ? new RegExp(`\\b(${keywords.map(escapeRegExp).join("|")})\\b`, "g")
-      : null;
-  const protectedTokens: string[] = [];
-
-  highlighted = protectToken(
-    highlighted,
-    /(\/\/[^\n]*|#[^\n]*)/g,
-    "comment",
-    protectedTokens
-  );
-  highlighted = protectToken(
-    highlighted,
-    /(&quot;[^"\n]*&quot;|'[^'\n]*')/g,
-    "string",
-    protectedTokens
-  );
-  if (keywordPattern) {
-    highlighted = highlighted.replace(
-      keywordPattern,
-      '<span data-rp-token="keyword">$1</span>'
-    );
-  }
-  highlighted = highlighted.replace(
-    /\b(\d+(?:\.\d+)?)\b/g,
-    '<span data-rp-token="number">$1</span>'
-  );
-  highlighted = highlighted.replace(/@@RP_TOKEN_(\d+)@@/g, (_, index) => {
-    return protectedTokens[Number(index)] ?? "";
+async function postJson<TResponse>(
+  url: string,
+  payload: unknown,
+  responseSchema: ZodType<TResponse>
+): Promise<TResponse> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
   });
 
-  return highlighted;
-}
+  const data: unknown = await response.json();
 
-function defaultFilenameForReviewLanguage(language: GenerateLanguage): string {
-  return `snippet.${REVIEW_LANGUAGE_EXTENSION[language]}`;
-}
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(data));
+  }
 
-function inferReviewLanguageFromFilename(filename: string): GenerateLanguage | null {
-  const normalized = filename.trim().toLowerCase();
-  if (normalized.endsWith(".ts") || normalized.endsWith(".tsx")) {
-    return "typescript";
+  const parsed = responseSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new Error("Invalid API response");
   }
-  if (normalized.endsWith(".js") || normalized.endsWith(".jsx")) {
-    return "javascript";
-  }
-  if (normalized.endsWith(".py")) {
-    return "python";
-  }
-  if (normalized.endsWith(".java")) {
-    return "java";
-  }
-  if (normalized.endsWith(".kt")) {
-    return "kotlin";
-  }
-  return null;
+
+  return parsed.data;
 }
 
 export default function Home() {
-  const [mode, setMode] = useState<"review" | "generate">("review");
+  const [mode, setMode] = useState<WorkspaceMode>("review");
   const [reviewCode, setReviewCode] = useState("");
   const [reviewLanguage, setReviewLanguage] =
     useState<GenerateLanguage>("typescript");
@@ -342,58 +80,6 @@ export default function Home() {
   const [result, setResult] = useState<ApiResult | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  const categories = [
-    { name: "코드 리뷰", count: 12 },
-    { name: "리팩토링", count: 8 },
-    { name: "문장 → 코드", count: 5 },
-  ];
-
-  const threads = [
-    { title: "auth.service.ts 리뷰", time: "방금 전" },
-    { title: "알고리즘 문제 풀이 생성", time: "10분 전" },
-    { title: "API 성능 개선 제안", time: "어제" },
-  ];
-
-  function extractErrorMessage(data: unknown): string {
-    const parsedError = apiErrorResponseSchema.safeParse(data);
-    if (!parsedError.success) {
-      return "요청 처리에 실패했습니다.";
-    }
-
-    if (!parsedError.data.details || parsedError.data.details.length === 0) {
-      return parsedError.data.error;
-    }
-
-    return `${parsedError.data.error}: ${parsedError.data.details.join(", ")}`;
-  }
-
-  async function postJson<TResponse>(
-    url: string,
-    payload: unknown,
-    responseSchema: ZodType<TResponse>
-  ): Promise<TResponse> {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data: unknown = await response.json();
-
-    if (!response.ok) {
-      throw new Error(extractErrorMessage(data));
-    }
-
-    const parsed = responseSchema.safeParse(data);
-    if (!parsed.success) {
-      throw new Error("Invalid API response");
-    }
-
-    return parsed.data;
-  }
-
   async function handleReviewSubmit() {
     setIsSubmitting(true);
     setErrorMessage(null);
@@ -409,7 +95,9 @@ export default function Home() {
       });
 
       if (!parsedPayload.success) {
-        const message = parsedPayload.error.issues[0]?.message ?? "입력값이 올바르지 않습니다.";
+        const message =
+          parsedPayload.error.issues[0]?.message ??
+          "입력값이 올바르지 않습니다.";
         throw new Error(message);
       }
 
@@ -441,7 +129,9 @@ export default function Home() {
       });
 
       if (!parsedPayload.success) {
-        const message = parsedPayload.error.issues[0]?.message ?? "입력값이 올바르지 않습니다.";
+        const message =
+          parsedPayload.error.issues[0]?.message ??
+          "입력값이 올바르지 않습니다.";
         throw new Error(message);
       }
 
@@ -519,70 +209,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe_0%,#f8fafc_45%,#eef2ff_100%)] text-slate-900">
       <div className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col md:flex-row">
-        <aside className="w-full border-b border-slate-200/80 bg-white/80 p-4 backdrop-blur md:h-screen md:w-72 md:border-r md:border-b-0 md:p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Portfolio
-              </p>
-              <h1 className="text-lg font-semibold tracking-tight">
-                ReviewPilot
-              </h1>
-            </div>
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-              v0
-            </span>
-          </div>
-
-          <button
-            type="button"
-            className="mt-4 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700"
-          >
-            + 새 스레드
-          </button>
-
-          <section className="mt-6">
-            <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              카테고리
-            </h2>
-            <ul className="mt-3 space-y-2">
-              {categories.map((category) => (
-                <li key={category.name}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
-                  >
-                    <span>{category.name}</span>
-                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                      {category.count}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="mt-6">
-            <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              최근 스레드
-            </h2>
-            <ul className="mt-3 space-y-2">
-              {threads.map((thread) => (
-                <li key={thread.title}>
-                  <button
-                    type="button"
-                    className="w-full rounded-lg border border-transparent px-3 py-2 text-left transition hover:border-slate-200 hover:bg-white"
-                  >
-                    <p className="truncate text-sm font-medium text-slate-800">
-                      {thread.title}
-                    </p>
-                    <p className="text-xs text-slate-500">{thread.time}</p>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </aside>
+        <Sidebar />
 
         <main className="flex-1 px-4 py-5 md:px-10 md:py-8">
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
@@ -599,385 +226,41 @@ export default function Home() {
               </p>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_8px_28px_rgba(15,23,42,0.05)]">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
-                    Workspace Mode
-                  </p>
-                  <h3 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">
-                    {mode === "review" ? "코드 분석 / 리팩토링" : "문장 → 코드 변환"}
-                  </h3>
-                </div>
+            <WorkspacePanel
+              mode={mode}
+              responseLanguage={responseLanguage}
+              onModeChange={setMode}
+              onResponseLanguageChange={setResponseLanguage}
+              reviewForm={{
+                reviewCode,
+                reviewFilename,
+                reviewLanguage,
+                isSubmitting,
+                onReviewCodeChange: setReviewCode,
+                onReviewFilenameChange: setReviewFilename,
+                onReviewLanguageChange: handleReviewLanguageChange,
+                onReviewFileChange: handleReviewFileChange,
+                onSubmit: handleReviewSubmit,
+              }}
+              generateForm={{
+                generatePrompt,
+                generateLanguage,
+                generateStyle,
+                isSubmitting,
+                onGeneratePromptChange: setGeneratePrompt,
+                onGenerateLanguageChange: setGenerateLanguage,
+                onGenerateStyleChange: setGenerateStyle,
+                onSubmit: handleGenerateSubmit,
+              }}
+            />
 
-                <div className="flex flex-col gap-2 sm:items-end">
-                  <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
-                    <button
-                      type="button"
-                      aria-pressed={mode === "review"}
-                      onClick={() => setMode("review")}
-                      className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                        mode === "review"
-                          ? "bg-slate-900 text-white shadow-sm"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      코드 분석
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={mode === "generate"}
-                      onClick={() => setMode("generate")}
-                      className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                        mode === "generate"
-                          ? "bg-slate-900 text-white shadow-sm"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      문장 → 코드
-                    </button>
-                  </div>
-
-                  <label className="flex items-center gap-2 text-xs text-slate-600">
-                    <span>응답 언어</span>
-                    <select
-                      name="response-language"
-                      value={responseLanguage}
-                      onChange={(event) =>
-                        setResponseLanguage(event.target.value as ResponseLanguage)
-                      }
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 outline-none ring-slate-900/10 transition focus:ring-4"
-                    >
-                      {RESPONSE_LANGUAGES.map((language) => (
-                        <option key={language} value={language}>
-                          {RESPONSE_LANGUAGE_LABEL[language]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
-
-              {mode === "review" ? (
-                <div className="mt-4">
-                  <label
-                    htmlFor="review-file"
-                    className="block rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600"
-                  >
-                    <p className="font-medium text-slate-800">파일 업로드 (선택)</p>
-                    <p className="mt-1">
-                      `.ts`, `.tsx`, `.js`, `.py`, `.java`, `.kt` 파일을 올리세요.
-                    </p>
-                    <input
-                      id="review-file"
-                      name="review-file"
-                      type="file"
-                      accept=".ts,.tsx,.js,.jsx,.py,.java,.kt,.go,.rs,.cpp,.c,.cs"
-                      onChange={handleReviewFileChange}
-                      className="mt-3 block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700"
-                    />
-                  </label>
-
-                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <input
-                      type="text"
-                      name="review-filename"
-                      value={reviewFilename}
-                      onChange={(event) => setReviewFilename(event.target.value)}
-                      placeholder="파일명 (예: snippet.java)"
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition placeholder:text-slate-400 focus:ring-4"
-                    />
-                    <select
-                      name="review-language"
-                      value={reviewLanguage}
-                      onChange={(event) =>
-                        handleReviewLanguageChange(
-                          event.target.value as GenerateLanguage
-                        )
-                      }
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition focus:ring-4"
-                    >
-                      {GENERATE_LANGUAGES.map((language) => (
-                        <option key={language} value={language}>
-                          {GENERATE_LANGUAGE_LABEL[language]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <label htmlFor="review-code" className="mt-4 block text-sm">
-                    <span className="font-medium text-slate-800">코드 직접 입력</span>
-                    <textarea
-                      id="review-code"
-                      name="review-code"
-                      rows={12}
-                      value={reviewCode}
-                      onChange={(event) => setReviewCode(event.target.value)}
-                      placeholder="분석할 코드를 붙여넣으세요."
-                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition placeholder:text-slate-400 focus:ring-4"
-                    />
-                  </label>
-
-                  <p className="mt-2 text-xs text-slate-500">
-                    현재 파일명: {reviewFilename || defaultFilenameForReviewLanguage(reviewLanguage)}
-                  </p>
-
-                  <button
-                    type="button"
-                    onClick={handleReviewSubmit}
-                    disabled={isSubmitting}
-                    className="mt-4 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700"
-                  >
-                    {isSubmitting ? "분석 중..." : "분석 시작"}
-                  </button>
-                </div>
-              ) : (
-                <div className="mt-4">
-                  <label htmlFor="problem-text" className="block text-sm">
-                    <span className="font-medium text-slate-800">
-                      문제/요구사항 입력
-                    </span>
-                    <textarea
-                      id="problem-text"
-                      name="problem-text"
-                      rows={16}
-                      value={generatePrompt}
-                      onChange={(event) => setGeneratePrompt(event.target.value)}
-                      placeholder="예: 정수 배열이 주어질 때 중복을 제거하고 오름차순으로 반환하는 TypeScript 함수를 작성해줘."
-                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition placeholder:text-slate-400 focus:ring-4"
-                    />
-                  </label>
-
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    <select
-                      name="language"
-                      value={generateLanguage}
-                      onChange={(event) =>
-                        setGenerateLanguage(event.target.value as GenerateLanguage)
-                      }
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition focus:ring-4"
-                    >
-                      {GENERATE_LANGUAGES.map((language) => (
-                        <option key={language} value={language}>
-                          {GENERATE_LANGUAGE_LABEL[language]}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      name="style"
-                      value={generateStyle}
-                      onChange={(event) =>
-                        setGenerateStyle(event.target.value as GenerateStyle)
-                      }
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-900/10 transition focus:ring-4"
-                    >
-                      {GENERATE_STYLES.map((style) => (
-                        <option key={style} value={style}>
-                          {GENERATE_STYLE_LABEL[style]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleGenerateSubmit}
-                    disabled={isSubmitting}
-                    className="mt-4 w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-500"
-                  >
-                    {isSubmitting ? "생성 중..." : "코드 생성"}
-                  </button>
-                </div>
-              )}
-            </section>
-
-            <section className="rounded-2xl border border-slate-200 bg-white/80 p-4 text-sm leading-6 text-slate-700">
-              <div className="flex items-center justify-between">
-                <p className="font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  API Response
-                </p>
-                {isSubmitting ? (
-                  <span className="text-sky-600">요청 중...</span>
-                ) : null}
-              </div>
-
-              {errorMessage ? (
-                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {errorMessage}
-                </div>
-              ) : null}
-
-              {result ? (
-                <div className="mt-3 space-y-3">
-                  <article className="rounded-xl border border-slate-200 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                      Summary
-                    </p>
-                    <p className="mt-1 text-sm text-slate-700">{result.summary}</p>
-                  </article>
-
-                  {result.mode === "review" ? (
-                    <>
-                      <article className="rounded-xl border border-slate-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                          Input
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
-                            파일: {result.input.filename}
-                          </span>
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
-                            언어: {result.input.language}
-                          </span>
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
-                            응답: {RESPONSE_LANGUAGE_LABEL[result.input.responseLanguage]}
-                          </span>
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
-                            라인: {result.input.lineCount}
-                          </span>
-                        </div>
-                      </article>
-
-                      <article className="rounded-xl border border-slate-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                          Issues
-                        </p>
-                        {result.issues.length === 0 ? (
-                          <p className="mt-2 text-sm text-slate-500">이슈가 없습니다.</p>
-                        ) : (
-                          <ul className="mt-2 space-y-2">
-                            {result.issues.map((issue) => (
-                              <li
-                                key={issue.id}
-                                className="rounded-lg border border-slate-200 bg-slate-50 p-3"
-                              >
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span
-                                    className={`rounded-full border px-2 py-0.5 text-xs font-medium ${REVIEW_SEVERITY_STYLE[issue.severity]}`}
-                                  >
-                                    {REVIEW_SEVERITY_LABEL[issue.severity]}
-                                  </span>
-                                  <p className="text-sm font-semibold text-slate-800">
-                                    {issue.title}
-                                  </p>
-                                  <span className="text-xs text-slate-500">
-                                    line {issue.line}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-sm text-slate-600">
-                                  {issue.message}
-                                </p>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </article>
-
-                      <article className="rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                            Refactored Code
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              copyToClipboard(result.refactoredCode, "review-refactor")
-                            }
-                            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
-                          >
-                            {copiedKey === "review-refactor" ? "복사됨" : "복사"}
-                          </button>
-                        </div>
-                        <pre className="rp-code mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
-                          <code
-                            dangerouslySetInnerHTML={{
-                              __html: highlightCodeToHtml(
-                                result.refactoredCode,
-                                result.input.language
-                              ),
-                            }}
-                          />
-                        </pre>
-                      </article>
-
-                      <article className="rounded-xl border border-slate-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                          Suggested Tests
-                        </p>
-                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
-                          {result.suggestedTests.map((test) => (
-                            <li key={test}>{test}</li>
-                          ))}
-                        </ul>
-                      </article>
-                    </>
-                  ) : (
-                    <>
-                      <article className="rounded-xl border border-slate-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                          Input
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
-                            언어: {result.input.language}
-                          </span>
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
-                            스타일: {result.input.style}
-                          </span>
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
-                            응답: {RESPONSE_LANGUAGE_LABEL[result.input.responseLanguage]}
-                          </span>
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
-                            프롬프트 길이: {result.input.promptLength}
-                          </span>
-                        </div>
-                      </article>
-
-                      <article className="rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                            Generated Code
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => copyToClipboard(result.code, "generate-code")}
-                            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
-                          >
-                            {copiedKey === "generate-code" ? "복사됨" : "복사"}
-                          </button>
-                        </div>
-                        <pre className="rp-code mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
-                          <code
-                            dangerouslySetInnerHTML={{
-                              __html: highlightCodeToHtml(
-                                result.code,
-                                result.input.language
-                              ),
-                            }}
-                          />
-                        </pre>
-                      </article>
-
-                      <article className="rounded-xl border border-slate-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                          Notes
-                        </p>
-                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
-                          {result.notes.map((note) => (
-                            <li key={note}>{note}</li>
-                          ))}
-                        </ul>
-                      </article>
-                    </>
-                  )}
-
-                </div>
-              ) : (
-                <p className="mt-3 text-sm text-slate-500">
-                  아직 결과가 없습니다. 위에서 분석 또는 생성을 실행해보세요.
-                </p>
-              )}
-            </section>
+            <ResponsePanel
+              isSubmitting={isSubmitting}
+              errorMessage={errorMessage}
+              result={result}
+              copiedKey={copiedKey}
+              onCopy={copyToClipboard}
+            />
           </div>
         </main>
       </div>
