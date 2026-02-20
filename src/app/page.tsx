@@ -65,6 +65,7 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResult | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const categories = [
     { name: "코드 리뷰", count: 12 },
@@ -191,6 +192,35 @@ export default function Home() {
     const text = await file.text();
     setReviewFilename(file.name);
     setReviewCode(text);
+  }
+
+  async function copyToClipboard(text: string, key: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        const copied = document.execCommand("copy");
+        document.body.removeChild(textarea);
+
+        if (!copied) {
+          throw new Error("copy failed");
+        }
+      }
+
+      setCopiedKey(key);
+      window.setTimeout(() => {
+        setCopiedKey((prev) => (prev === key ? null : prev));
+      }, 1500);
+    } catch {
+      setErrorMessage("클립보드 복사에 실패했습니다. 브라우저 권한을 확인해주세요.");
+    }
   }
 
   return (
@@ -522,9 +552,20 @@ export default function Home() {
                       </article>
 
                       <article className="rounded-xl border border-slate-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                          Refactored Code
-                        </p>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
+                            Refactored Code
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              copyToClipboard(result.refactoredCode, "review-refactor")
+                            }
+                            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+                          >
+                            {copiedKey === "review-refactor" ? "복사됨" : "복사"}
+                          </button>
+                        </div>
                         <pre className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
                           {result.refactoredCode}
                         </pre>
@@ -564,9 +605,18 @@ export default function Home() {
                       </article>
 
                       <article className="rounded-xl border border-slate-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                          Generated Code
-                        </p>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
+                            Generated Code
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(result.code, "generate-code")}
+                            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+                          >
+                            {copiedKey === "generate-code" ? "복사됨" : "복사"}
+                          </button>
+                        </div>
                         <pre className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
                           {result.code}
                         </pre>
