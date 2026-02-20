@@ -239,11 +239,11 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#e2e8f0_0%,#f8fafc_40%,#eef2ff_100%)] text-slate-900">
-      <div className="flex min-h-screen w-full flex-col md:flex-row">
+    <div className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#e2e8f0_0%,#f8fafc_40%,#eef2ff_100%)] text-slate-900">
+      <div className="flex h-full w-full flex-col md:flex-row">
         <Sidebar />
 
-        <main className="flex-1 border-t border-slate-200/80 bg-white/75 px-4 py-5 md:border-t-0 md:border-l md:px-8 md:py-7">
+        <main className="min-h-0 flex-1 overflow-y-auto border-t border-slate-200/80 bg-white/75 px-4 py-5 md:border-t-0 md:border-l md:px-8 md:py-7">
           <div className="mx-auto flex w-full max-w-6xl flex-col">
             <WorkspacePanel
               mode={mode}

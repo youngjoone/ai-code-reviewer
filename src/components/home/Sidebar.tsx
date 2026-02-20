@@ -5,7 +5,7 @@ import {
 
 export function Sidebar() {
   return (
-    <aside className="w-full border-b border-slate-200 bg-white px-4 py-4 md:h-screen md:w-72 md:border-r md:border-b-0 md:px-5 md:py-5">
+    <aside className="w-full overflow-y-auto border-b border-slate-200 bg-white px-4 py-4 md:h-full md:w-72 md:border-r md:border-b-0 md:px-5 md:py-5">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
