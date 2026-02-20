@@ -126,3 +126,25 @@
     @apply bg-background text-foreground;
   }
 }
+
+.rp-code code {
+  white-space: pre;
+}
+
+[data-rp-token="keyword"] {
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+[data-rp-token="string"] {
+  color: #86efac;
+}
+
+[data-rp-token="number"] {
+  color: #f9a8d4;
+}
+
+[data-rp-token="comment"] {
+  color: #94a3b8;
+  font-style: italic;
+}
