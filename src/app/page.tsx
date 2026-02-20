@@ -245,19 +245,6 @@ export default function Home() {
 
         <main className="flex-1 px-4 py-5 md:px-10 md:py-8">
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
-            <section className="rounded-2xl border border-slate-200 bg-white/85 p-5 shadow-[0_8px_28px_rgba(15,23,42,0.06)] md:p-6">
-              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
-                Main Workspace
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl">
-                코드 리뷰와 문장 기반 코드 생성을 한 화면에서 시작하세요.
-              </h2>
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                지금은 UI 뼈대 단계입니다. 아래 영역에서 파일 업로드/코드 입력 중심
-                흐름을 먼저 고정하고, 다음 단계에서 API 연결을 진행하면 됩니다.
-              </p>
-            </section>
-
             <WorkspacePanel
               mode={mode}
               responseLanguage={responseLanguage}
