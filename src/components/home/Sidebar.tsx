@@ -1,9 +1,32 @@
-import {
-  SIDEBAR_CATEGORIES,
-  SIDEBAR_THREADS,
-} from "@/components/home/config";
+import { type WorkspaceMode } from "@/components/home/types";
 
-export function Sidebar() {
+type SidebarCategory = {
+  name: string;
+  count: number;
+};
+
+type SidebarThread = {
+  id: string;
+  title: string;
+  timeLabel: string;
+  mode: WorkspaceMode;
+};
+
+type SidebarProps = {
+  categories: SidebarCategory[];
+  threads: SidebarThread[];
+  activeThreadId: string | null;
+  onNewThread: () => void;
+  onSelectThread: (threadId: string) => void;
+};
+
+export function Sidebar({
+  categories,
+  threads,
+  activeThreadId,
+  onNewThread,
+  onSelectThread,
+}: SidebarProps) {
   return (
     <aside className="w-full overflow-y-auto border-b border-slate-200 bg-white px-4 py-4 md:h-full md:w-72 md:border-r md:border-b-0 md:px-5 md:py-5">
       <div className="flex items-center justify-between">
@@ -20,6 +43,7 @@ export function Sidebar() {
 
       <button
         type="button"
+        onClick={onNewThread}
         className="mt-4 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700"
       >
         + 새 스레드
@@ -30,7 +54,7 @@ export function Sidebar() {
           카테고리
         </h2>
         <ul className="mt-3 space-y-2">
-          {SIDEBAR_CATEGORIES.map((category) => (
+          {categories.map((category) => (
             <li key={category.name}>
               <button
                 type="button"
@@ -51,16 +75,24 @@ export function Sidebar() {
           최근 스레드
         </h2>
         <ul className="mt-3 space-y-2">
-          {SIDEBAR_THREADS.map((thread) => (
-            <li key={thread.title}>
+          {threads.map((thread) => (
+            <li key={thread.id}>
               <button
                 type="button"
-                className="w-full rounded-md border border-transparent px-3 py-2 text-left transition hover:border-slate-200 hover:bg-slate-50"
+                onClick={() => onSelectThread(thread.id)}
+                className={`w-full rounded-md border px-3 py-2 text-left transition ${
+                  activeThreadId === thread.id
+                    ? "border-slate-300 bg-slate-100"
+                    : "border-transparent hover:border-slate-200 hover:bg-slate-50"
+                }`}
               >
                 <p className="truncate text-sm font-medium text-slate-800">
                   {thread.title}
                 </p>
-                <p className="text-xs text-slate-500">{thread.time}</p>
+                <p className="text-xs text-slate-500">
+                  {thread.mode === "review" ? "코드 분석" : "문장 → 코드"} ·{" "}
+                  {thread.timeLabel}
+                </p>
               </button>
             </li>
           ))}
