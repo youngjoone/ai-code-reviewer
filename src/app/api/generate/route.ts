@@ -17,6 +17,20 @@ function zodIssuesToStrings(error: z.ZodError): string[] {
   });
 }
 
+function createErrorResponse(
+  error: string,
+  status: number,
+  details?: string[]
+) {
+  const errorPayload = apiErrorResponseSchema.parse({
+    ok: false,
+    error,
+    details,
+  });
+
+  return NextResponse.json(errorPayload, { status });
+}
+
 export async function GET() {
   const payload = generateHealthResponseSchema.parse({
     ok: true,
@@ -34,23 +48,16 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    const errorPayload = apiErrorResponseSchema.parse({
-      ok: false,
-      error: "Invalid JSON body",
-    });
-
-    return NextResponse.json(errorPayload, { status: 400 });
+    return createErrorResponse("Invalid JSON body", 400);
   }
 
   const parsedBody = generateRequestSchema.safeParse(rawBody);
   if (!parsedBody.success) {
-    const errorPayload = apiErrorResponseSchema.parse({
-      ok: false,
-      error: "Invalid request body",
-      details: zodIssuesToStrings(parsedBody.error),
-    });
-
-    return NextResponse.json(errorPayload, { status: 400 });
+    return createErrorResponse(
+      "Invalid request body",
+      400,
+      zodIssuesToStrings(parsedBody.error)
+    );
   }
 
   const prompt = parsedBody.data.prompt;
@@ -61,7 +68,7 @@ export async function POST(request: Request) {
     const provider = getLlmProvider();
     const parsed = await provider.generate({ prompt, language, style });
 
-    const responsePayload = generateResponseSchema.parse({
+    const responsePayloadResult = generateResponseSchema.safeParse({
       ok: true,
       mode: "generate",
       input: {
@@ -74,16 +81,18 @@ export async function POST(request: Request) {
       notes: parsed.notes,
     });
 
-    return NextResponse.json(responsePayload);
+    if (!responsePayloadResult.success) {
+      return createErrorResponse(
+        "LLM output validation failed",
+        502,
+        zodIssuesToStrings(responsePayloadResult.error)
+      );
+    }
+
+    return NextResponse.json(responsePayloadResult.data);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to call LLM API";
-    const errorPayload = apiErrorResponseSchema.parse({
-      ok: false,
-      error: "LLM request failed",
-      details: [message],
-    });
-
-    return NextResponse.json(errorPayload, { status: 502 });
+    return createErrorResponse("LLM request failed", 502, [message]);
   }
 }
