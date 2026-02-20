@@ -7,51 +7,8 @@ import {
   generateRequestSchema,
   generateResponseSchema,
   generateStyleSchema,
-  type GenerateLanguage,
 } from "@/lib/schemas";
-
-function buildMockCode(
-  language: GenerateLanguage,
-  prompt: string
-): string {
-  if (language === "python") {
-    return [
-      "# mock generated code",
-      "# prompt:",
-      `# ${prompt}`,
-      "",
-      "def solve(values):",
-      "    return sorted(set(values))",
-      "",
-      "if __name__ == '__main__':",
-      "    print(solve([3, 1, 2, 2]))",
-    ].join("\n");
-  }
-
-  if (language === "javascript") {
-    return [
-      "// mock generated code",
-      `// prompt: ${prompt}`,
-      "",
-      "function solve(values) {",
-      "  return [...new Set(values)].sort((a, b) => a - b);",
-      "}",
-      "",
-      "console.log(solve([3, 1, 2, 2]));",
-    ].join("\n");
-  }
-
-  return [
-    "// mock generated code",
-    `// prompt: ${prompt}`,
-    "",
-    "export function solve(values: number[]): number[] {",
-    "  return [...new Set(values)].sort((a, b) => a - b);",
-    "}",
-    "",
-    "console.log(solve([3, 1, 2, 2]));",
-  ].join("\n");
-}
+import { getLlmProvider } from "@/lib/llm";
 
 function zodIssuesToStrings(error: z.ZodError): string[] {
   return error.issues.map((issue) => {
@@ -64,7 +21,7 @@ export async function GET() {
   const payload = generateHealthResponseSchema.parse({
     ok: true,
     endpoint: "/api/generate",
-    message: "Generate mock API is running",
+    message: "Generate API is running",
     method: "POST",
   });
 
@@ -100,22 +57,33 @@ export async function POST(request: Request) {
   const language = parsedBody.data.language ?? generateLanguageSchema.enum.typescript;
   const style = parsedBody.data.style ?? generateStyleSchema.enum.clean;
 
-  const responsePayload = generateResponseSchema.parse({
-    ok: true,
-    mode: "generate",
-    input: {
-      language,
-      style,
-      promptLength: prompt.length,
-    },
-    summary:
-      "Mock generation completed. This response is a placeholder before OpenAI integration.",
-    code: buildMockCode(language, prompt),
-    notes: [
-      "This is deterministic mock output for frontend integration.",
-      "Replace this with OpenAI API call in the next step.",
-    ],
-  });
+  try {
+    const provider = getLlmProvider();
+    const parsed = await provider.generate({ prompt, language, style });
 
-  return NextResponse.json(responsePayload);
+    const responsePayload = generateResponseSchema.parse({
+      ok: true,
+      mode: "generate",
+      input: {
+        language,
+        style,
+        promptLength: prompt.length,
+      },
+      summary: parsed.summary,
+      code: parsed.code,
+      notes: parsed.notes,
+    });
+
+    return NextResponse.json(responsePayload);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to call LLM API";
+    const errorPayload = apiErrorResponseSchema.parse({
+      ok: false,
+      error: "LLM request failed",
+      details: [message],
+    });
+
+    return NextResponse.json(errorPayload, { status: 502 });
+  }
 }

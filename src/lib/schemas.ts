@@ -40,6 +40,13 @@ export const reviewResponseSchema = z.object({
   suggestedTests: z.array(z.string()),
 });
 
+export const reviewLlmOutputSchema = z.object({
+  summary: z.string(),
+  issues: z.array(reviewIssueSchema),
+  refactoredCode: z.string(),
+  suggestedTests: z.array(z.string()),
+});
+
 export const reviewHealthResponseSchema = z.object({
   ok: z.literal(true),
   endpoint: z.literal("/api/review"),
@@ -66,6 +73,12 @@ export const generateResponseSchema = z.object({
   notes: z.array(z.string()),
 });
 
+export const generateLlmOutputSchema = z.object({
+  summary: z.string(),
+  code: z.string(),
+  notes: z.array(z.string()),
+});
+
 export const generateHealthResponseSchema = z.object({
   ok: z.literal(true),
   endpoint: z.literal("/api/generate"),
@@ -78,5 +91,7 @@ export type GenerateLanguage = z.infer<typeof generateLanguageSchema>;
 export type GenerateRequest = z.infer<typeof generateRequestSchema>;
 export type GenerateResponse = z.infer<typeof generateResponseSchema>;
 export type GenerateStyle = z.infer<typeof generateStyleSchema>;
+export type GenerateLlmOutput = z.infer<typeof generateLlmOutputSchema>;
 export type ReviewRequest = z.infer<typeof reviewRequestSchema>;
 export type ReviewResponse = z.infer<typeof reviewResponseSchema>;
+export type ReviewLlmOutput = z.infer<typeof reviewLlmOutputSchema>;

@@ -6,23 +6,7 @@ import {
   reviewRequestSchema,
   reviewResponseSchema,
 } from "@/lib/schemas";
-
-const MOCK_ISSUES = [
-  {
-    id: "issue-1",
-    severity: "medium",
-    title: "Extract repeated logic",
-    message: "Consider extracting repeated blocks into a helper function.",
-    line: 8,
-  },
-  {
-    id: "issue-2",
-    severity: "low",
-    title: "Improve naming",
-    message: "Use more explicit variable names for readability.",
-    line: 3,
-  },
-] as const;
+import { getLlmProvider } from "@/lib/llm";
 
 function zodIssuesToStrings(error: z.ZodError): string[] {
   return error.issues.map((issue) => {
@@ -40,7 +24,7 @@ export async function GET() {
   const payload = reviewHealthResponseSchema.parse({
     ok: true,
     endpoint: "/api/review",
-    message: "Review mock API is running",
+    message: "Review API is running",
     method: "POST",
   });
 
@@ -77,25 +61,34 @@ export async function POST(request: Request) {
   const filename = parsedBody.data.filename ?? "snippet.ts";
   const lineCount = safeLineCount(code);
 
-  const responsePayload = reviewResponseSchema.parse({
-    ok: true,
-    mode: "review",
-    input: {
-      filename,
-      language,
-      lineCount,
-    },
-    summary:
-      "Mock analysis completed. This response is a placeholder before OpenAI integration.",
-    issues: MOCK_ISSUES,
-    refactoredCode:
-      "// mock refactored code\nfunction improveReadability(input: string) {\n  return input.trim();\n}",
-    suggestedTests: [
-      "returns expected output for a normal input",
-      "handles empty input safely",
-      "handles invalid input types if applicable",
-    ],
-  });
+  try {
+    const provider = getLlmProvider();
+    const parsed = await provider.review({ filename, language, code });
 
-  return NextResponse.json(responsePayload);
+    const responsePayload = reviewResponseSchema.parse({
+      ok: true,
+      mode: "review",
+      input: {
+        filename,
+        language,
+        lineCount,
+      },
+      summary: parsed.summary,
+      issues: parsed.issues,
+      refactoredCode: parsed.refactoredCode,
+      suggestedTests: parsed.suggestedTests,
+    });
+
+    return NextResponse.json(responsePayload);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to call LLM API";
+    const errorPayload = apiErrorResponseSchema.parse({
+      ok: false,
+      error: "LLM request failed",
+      details: [message],
+    });
+
+    return NextResponse.json(errorPayload, { status: 502 });
+  }
 }
