@@ -74,6 +74,7 @@ export async function POST(request: Request) {
       language,
       style,
       responseLanguage,
+      signal: request.signal,
     });
 
     const responsePayloadResult = generateResponseSchema.safeParse({

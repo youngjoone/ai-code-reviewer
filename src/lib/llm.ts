@@ -16,6 +16,7 @@ type ReviewInput = {
   language: string;
   code: string;
   responseLanguage: ResponseLanguage;
+  signal?: AbortSignal;
 };
 
 type GenerateInput = {
@@ -23,6 +24,7 @@ type GenerateInput = {
   language: GenerateLanguage;
   style: GenerateStyle;
   responseLanguage: ResponseLanguage;
+  signal?: AbortSignal;
 };
 
 export type LlmProvider = {
@@ -36,7 +38,7 @@ const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const GEMINI_FALLBACK_MODEL = "gemini-2.5-flash";
 const GEMINI_RETRY_DELAY_MS = 3_000;
 const GEMINI_MAX_ATTEMPTS = 3;
-const GEMINI_TIMEOUT_MS = 20_000;
+const GEMINI_TIMEOUT_MS = 300_000;
 
 class GeminiRequestError extends Error {
   readonly retryable: boolean;
@@ -166,11 +168,26 @@ function isRetryableError(error: unknown): boolean {
   return false;
 }
 
-async function fetchGeminiPayload(url: string, prompt: string): Promise<unknown> {
+async function fetchGeminiPayload(
+  url: string,
+  prompt: string,
+  requestSignal?: AbortSignal
+): Promise<unknown> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  let detachAbortHandler: (() => void) | null = null;
 
   try {
+    if (requestSignal?.aborted) {
+      controller.abort(requestSignal.reason);
+    } else if (requestSignal) {
+      const onAbort = () => controller.abort(requestSignal.reason);
+      requestSignal.addEventListener("abort", onAbort, { once: true });
+      detachAbortHandler = () => {
+        requestSignal.removeEventListener("abort", onAbort);
+      };
+    }
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -205,14 +222,28 @@ async function fetchGeminiPayload(url: string, prompt: string): Promise<unknown>
     }
 
     return payload;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      if (requestSignal?.aborted) {
+        throw new GeminiRequestError("LLM request was aborted by client", false);
+      }
+      throw new GeminiRequestError(
+        `Gemini API timeout after ${Math.floor(GEMINI_TIMEOUT_MS / 1000)}s`,
+        true
+      );
+    }
+
+    throw error;
   } finally {
     clearTimeout(timeoutId);
+    detachAbortHandler?.();
   }
 }
 
 async function geminiJsonRequest<T>(
   schema: z.ZodType<T>,
-  prompt: string
+  prompt: string,
+  requestSignal?: AbortSignal
 ): Promise<T> {
   const { apiKey, model } = getGeminiConfig();
   const url = `${GEMINI_BASE_URL}/models/${encodeURIComponent(
@@ -221,7 +252,7 @@ async function geminiJsonRequest<T>(
 
   for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt += 1) {
     try {
-      const payload = await fetchGeminiPayload(url, prompt);
+      const payload = await fetchGeminiPayload(url, prompt, requestSignal);
       const text = getTextFromGeminiResponse(payload);
 
       let parsedJson: unknown;
@@ -261,9 +292,13 @@ function createGeminiProvider(): LlmProvider {
     name: "gemini",
     model,
     review: async (input) =>
-      geminiJsonRequest(reviewLlmOutputSchema, buildReviewPrompt(input)),
+      geminiJsonRequest(reviewLlmOutputSchema, buildReviewPrompt(input), input.signal),
     generate: async (input) =>
-      geminiJsonRequest(generateLlmOutputSchema, buildGeneratePrompt(input)),
+      geminiJsonRequest(
+        generateLlmOutputSchema,
+        buildGeneratePrompt(input),
+        input.signal
+      ),
   };
 }
 

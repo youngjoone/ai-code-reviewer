@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { type ZodType } from "zod";
 import { ResponsePanel } from "@/components/home/ResponsePanel";
 import { Sidebar } from "@/components/home/Sidebar";
@@ -37,7 +37,8 @@ function extractErrorMessage(data: unknown): string {
 async function postJson<TResponse>(
   url: string,
   payload: unknown,
-  responseSchema: ZodType<TResponse>
+  responseSchema: ZodType<TResponse>,
+  signal?: AbortSignal
 ): Promise<TResponse> {
   const response = await fetch(url, {
     method: "POST",
@@ -45,6 +46,7 @@ async function postJson<TResponse>(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
+    signal,
   });
 
   const data: unknown = await response.json();
@@ -79,10 +81,21 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResult | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const requestAbortControllerRef = useRef<AbortController | null>(null);
+
+  function handleCancelRequest() {
+    requestAbortControllerRef.current?.abort();
+    requestAbortControllerRef.current = null;
+    setIsSubmitting(false);
+    setErrorMessage("요청을 중지했습니다.");
+  }
 
   async function handleReviewSubmit() {
     setIsSubmitting(true);
     setErrorMessage(null);
+    requestAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortControllerRef.current = controller;
 
     try {
       const filename =
@@ -104,21 +117,32 @@ export default function Home() {
       const data = await postJson(
         "/api/review",
         parsedPayload.data,
-        reviewResponseSchema
+        reviewResponseSchema,
+        controller.signal
       );
       setResult(data);
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        setErrorMessage("요청이 중지되었습니다.");
+        return;
+      }
       const message =
         error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
       setErrorMessage(message);
     } finally {
-      setIsSubmitting(false);
+      if (requestAbortControllerRef.current === controller) {
+        requestAbortControllerRef.current = null;
+        setIsSubmitting(false);
+      }
     }
   }
 
   async function handleGenerateSubmit() {
     setIsSubmitting(true);
     setErrorMessage(null);
+    requestAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortControllerRef.current = controller;
 
     try {
       const parsedPayload = generateRequestSchema.safeParse({
@@ -138,15 +162,23 @@ export default function Home() {
       const data = await postJson(
         "/api/generate",
         parsedPayload.data,
-        generateResponseSchema
+        generateResponseSchema,
+        controller.signal
       );
       setResult(data);
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        setErrorMessage("요청이 중지되었습니다.");
+        return;
+      }
       const message =
         error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
       setErrorMessage(message);
     } finally {
-      setIsSubmitting(false);
+      if (requestAbortControllerRef.current === controller) {
+        requestAbortControllerRef.current = null;
+        setIsSubmitting(false);
+      }
     }
   }
 
@@ -229,8 +261,10 @@ export default function Home() {
             <WorkspacePanel
               mode={mode}
               responseLanguage={responseLanguage}
+              isSubmitting={isSubmitting}
               onModeChange={setMode}
               onResponseLanguageChange={setResponseLanguage}
+              onCancelRequest={handleCancelRequest}
               reviewForm={{
                 reviewCode,
                 reviewFilename,

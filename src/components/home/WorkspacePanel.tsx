@@ -16,8 +16,10 @@ import { type WorkspaceMode } from "@/components/home/types";
 type WorkspacePanelProps = {
   mode: WorkspaceMode;
   responseLanguage: ResponseLanguage;
+  isSubmitting: boolean;
   onModeChange: (mode: WorkspaceMode) => void;
   onResponseLanguageChange: (language: ResponseLanguage) => void;
+  onCancelRequest: () => void;
   reviewForm: ReviewFormProps;
   generateForm: GenerateFormProps;
 };
@@ -25,8 +27,10 @@ type WorkspacePanelProps = {
 export function WorkspacePanel({
   mode,
   responseLanguage,
+  isSubmitting,
   onModeChange,
   onResponseLanguageChange,
+  onCancelRequest,
   reviewForm,
   generateForm,
 }: WorkspacePanelProps) {
@@ -87,6 +91,16 @@ export function WorkspacePanel({
               ))}
             </select>
           </label>
+
+          {isSubmitting ? (
+            <button
+              type="button"
+              onClick={onCancelRequest}
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 transition hover:bg-red-100"
+            >
+              중지
+            </button>
+          ) : null}
         </div>
       </div>
 

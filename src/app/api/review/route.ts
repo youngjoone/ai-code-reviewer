@@ -125,6 +125,7 @@ export async function POST(request: Request) {
       language,
       code,
       responseLanguage,
+      signal: request.signal,
     });
 
     const responsePayloadResult = reviewResponseSchema.safeParse({
