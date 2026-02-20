@@ -1,20 +1,13 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
+import {
+  apiErrorResponseSchema,
+  reviewHealthResponseSchema,
+  reviewRequestSchema,
+  reviewResponseSchema,
+} from "@/lib/schemas";
 
-type ReviewRequest = {
-  code?: string;
-  filename?: string;
-  language?: string;
-};
-
-type ReviewIssue = {
-  id: string;
-  severity: "low" | "medium" | "high";
-  title: string;
-  message: string;
-  line: number;
-};
-
-const MOCK_ISSUES: ReviewIssue[] = [
+const MOCK_ISSUES = [
   {
     id: "issue-1",
     severity: "medium",
@@ -29,7 +22,14 @@ const MOCK_ISSUES: ReviewIssue[] = [
     message: "Use more explicit variable names for readability.",
     line: 3,
   },
-];
+] as const;
+
+function zodIssuesToStrings(error: z.ZodError): string[] {
+  return error.issues.map((issue) => {
+    const path = issue.path.length > 0 ? issue.path.join(".") : "body";
+    return `${path}: ${issue.message}`;
+  });
+}
 
 function safeLineCount(code: string): number {
   const normalized = code.replace(/\r\n/g, "\n");
@@ -37,45 +37,47 @@ function safeLineCount(code: string): number {
 }
 
 export async function GET() {
-  return NextResponse.json({
+  const payload = reviewHealthResponseSchema.parse({
     ok: true,
     endpoint: "/api/review",
     message: "Review mock API is running",
     method: "POST",
   });
+
+  return NextResponse.json(payload);
 }
 
 export async function POST(request: Request) {
-  let body: ReviewRequest;
+  let rawBody: unknown;
 
   try {
-    body = (await request.json()) as ReviewRequest;
+    rawBody = await request.json();
   } catch {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Invalid JSON body",
-      },
-      { status: 400 }
-    );
+    const errorPayload = apiErrorResponseSchema.parse({
+      ok: false,
+      error: "Invalid JSON body",
+    });
+
+    return NextResponse.json(errorPayload, { status: 400 });
   }
 
-  const code = body.code?.trim() ?? "";
-  if (!code) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "`code` is required",
-      },
-      { status: 400 }
-    );
+  const parsedBody = reviewRequestSchema.safeParse(rawBody);
+  if (!parsedBody.success) {
+    const errorPayload = apiErrorResponseSchema.parse({
+      ok: false,
+      error: "Invalid request body",
+      details: zodIssuesToStrings(parsedBody.error),
+    });
+
+    return NextResponse.json(errorPayload, { status: 400 });
   }
 
-  const language = body.language ?? "typescript";
-  const filename = body.filename ?? "snippet.ts";
+  const code = parsedBody.data.code;
+  const language = parsedBody.data.language ?? "typescript";
+  const filename = parsedBody.data.filename ?? "snippet.ts";
   const lineCount = safeLineCount(code);
 
-  return NextResponse.json({
+  const responsePayload = reviewResponseSchema.parse({
     ok: true,
     mode: "review",
     input: {
@@ -94,4 +96,6 @@ export async function POST(request: Request) {
       "handles invalid input types if applicable",
     ],
   });
+
+  return NextResponse.json(responsePayload);
 }

@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
-
-type GenerateRequest = {
-  prompt?: string;
-  language?: "typescript" | "javascript" | "python";
-  style?: "clean" | "fast" | "explain";
-};
+import { z } from "zod";
+import {
+  apiErrorResponseSchema,
+  generateHealthResponseSchema,
+  generateLanguageSchema,
+  generateRequestSchema,
+  generateResponseSchema,
+  generateStyleSchema,
+  type GenerateLanguage,
+} from "@/lib/schemas";
 
 function buildMockCode(
-  language: "typescript" | "javascript" | "python",
+  language: GenerateLanguage,
   prompt: string
 ): string {
   if (language === "python") {
@@ -49,45 +53,54 @@ function buildMockCode(
   ].join("\n");
 }
 
+function zodIssuesToStrings(error: z.ZodError): string[] {
+  return error.issues.map((issue) => {
+    const path = issue.path.length > 0 ? issue.path.join(".") : "body";
+    return `${path}: ${issue.message}`;
+  });
+}
+
 export async function GET() {
-  return NextResponse.json({
+  const payload = generateHealthResponseSchema.parse({
     ok: true,
     endpoint: "/api/generate",
     message: "Generate mock API is running",
     method: "POST",
   });
+
+  return NextResponse.json(payload);
 }
 
 export async function POST(request: Request) {
-  let body: GenerateRequest;
+  let rawBody: unknown;
 
   try {
-    body = (await request.json()) as GenerateRequest;
+    rawBody = await request.json();
   } catch {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Invalid JSON body",
-      },
-      { status: 400 }
-    );
+    const errorPayload = apiErrorResponseSchema.parse({
+      ok: false,
+      error: "Invalid JSON body",
+    });
+
+    return NextResponse.json(errorPayload, { status: 400 });
   }
 
-  const prompt = body.prompt?.trim() ?? "";
-  if (!prompt) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "`prompt` is required",
-      },
-      { status: 400 }
-    );
+  const parsedBody = generateRequestSchema.safeParse(rawBody);
+  if (!parsedBody.success) {
+    const errorPayload = apiErrorResponseSchema.parse({
+      ok: false,
+      error: "Invalid request body",
+      details: zodIssuesToStrings(parsedBody.error),
+    });
+
+    return NextResponse.json(errorPayload, { status: 400 });
   }
 
-  const language = body.language ?? "typescript";
-  const style = body.style ?? "clean";
+  const prompt = parsedBody.data.prompt;
+  const language = parsedBody.data.language ?? generateLanguageSchema.enum.typescript;
+  const style = parsedBody.data.style ?? generateStyleSchema.enum.clean;
 
-  return NextResponse.json({
+  const responsePayload = generateResponseSchema.parse({
     ok: true,
     mode: "generate",
     input: {
@@ -103,4 +116,6 @@ export async function POST(request: Request) {
       "Replace this with OpenAI API call in the next step.",
     ],
   });
+
+  return NextResponse.json(responsePayload);
 }

@@ -1,28 +1,34 @@
 "use client";
 
 import { useState, type ChangeEvent } from "react";
+import { type ZodType } from "zod";
+import {
+  apiErrorResponseSchema,
+  generateRequestSchema,
+  generateResponseSchema,
+  GENERATE_LANGUAGES,
+  GENERATE_STYLES,
+  reviewRequestSchema,
+  reviewResponseSchema,
+  type GenerateLanguage,
+  type GenerateResponse,
+  type GenerateStyle,
+  type ReviewResponse,
+} from "@/lib/schemas";
 
-type JsonObject = Record<string, unknown>;
+type ApiResult = ReviewResponse | GenerateResponse;
 
-const GENERATE_LANGUAGES = ["typescript", "javascript", "python"] as const;
-type GenerateLanguage = (typeof GENERATE_LANGUAGES)[number];
 const GENERATE_LANGUAGE_LABEL: Record<GenerateLanguage, string> = {
   typescript: "TypeScript",
   javascript: "JavaScript",
   python: "Python",
 };
 
-const GENERATE_STYLES = ["clean", "fast", "explain"] as const;
-type GenerateStyle = (typeof GENERATE_STYLES)[number];
 const GENERATE_STYLE_LABEL: Record<GenerateStyle, string> = {
   clean: "깔끔한 구현",
   fast: "성능 우선",
   explain: "설명 포함",
 };
-
-function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null;
-}
 
 export default function Home() {
   const [mode, setMode] = useState<"review" | "generate">("review");
@@ -34,7 +40,7 @@ export default function Home() {
   const [generateStyle, setGenerateStyle] = useState<GenerateStyle>("clean");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [result, setResult] = useState<JsonObject | null>(null);
+  const [result, setResult] = useState<ApiResult | null>(null);
 
   const categories = [
     { name: "코드 리뷰", count: 12 },
@@ -48,7 +54,24 @@ export default function Home() {
     { title: "API 성능 개선 제안", time: "어제" },
   ];
 
-  async function postJson(url: string, payload: JsonObject): Promise<JsonObject> {
+  function extractErrorMessage(data: unknown): string {
+    const parsedError = apiErrorResponseSchema.safeParse(data);
+    if (!parsedError.success) {
+      return "요청 처리에 실패했습니다.";
+    }
+
+    if (!parsedError.data.details || parsedError.data.details.length === 0) {
+      return parsedError.data.error;
+    }
+
+    return `${parsedError.data.error}: ${parsedError.data.details.join(", ")}`;
+  }
+
+  async function postJson<TResponse>(
+    url: string,
+    payload: unknown,
+    responseSchema: ZodType<TResponse>
+  ): Promise<TResponse> {
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -58,17 +81,17 @@ export default function Home() {
     });
 
     const data: unknown = await response.json();
-    if (!isJsonObject(data)) {
+
+    if (!response.ok) {
+      throw new Error(extractErrorMessage(data));
+    }
+
+    const parsed = responseSchema.safeParse(data);
+    if (!parsed.success) {
       throw new Error("Invalid API response");
     }
 
-    if (!response.ok || data.ok === false) {
-      const message =
-        typeof data.error === "string" ? data.error : "요청 처리에 실패했습니다.";
-      throw new Error(message);
-    }
-
-    return data;
+    return parsed.data;
   }
 
   async function handleReviewSubmit() {
@@ -76,11 +99,22 @@ export default function Home() {
     setErrorMessage(null);
 
     try {
-      const data = await postJson("/api/review", {
+      const parsedPayload = reviewRequestSchema.safeParse({
         code: reviewCode,
         filename: reviewFilename,
         language: "typescript",
       });
+
+      if (!parsedPayload.success) {
+        const message = parsedPayload.error.issues[0]?.message ?? "입력값이 올바르지 않습니다.";
+        throw new Error(message);
+      }
+
+      const data = await postJson(
+        "/api/review",
+        parsedPayload.data,
+        reviewResponseSchema
+      );
       setResult(data);
     } catch (error) {
       const message =
@@ -96,11 +130,22 @@ export default function Home() {
     setErrorMessage(null);
 
     try {
-      const data = await postJson("/api/generate", {
+      const parsedPayload = generateRequestSchema.safeParse({
         prompt: generatePrompt,
         language: generateLanguage,
         style: generateStyle,
       });
+
+      if (!parsedPayload.success) {
+        const message = parsedPayload.error.issues[0]?.message ?? "입력값이 올바르지 않습니다.";
+        throw new Error(message);
+      }
+
+      const data = await postJson(
+        "/api/generate",
+        parsedPayload.data,
+        generateResponseSchema
+      );
       setResult(data);
     } catch (error) {
       const message =
