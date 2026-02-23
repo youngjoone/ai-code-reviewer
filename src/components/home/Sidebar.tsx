@@ -10,6 +10,7 @@ type SidebarThread = {
   title: string;
   timeLabel: string;
   mode: WorkspaceMode;
+  requestCount: number;
 };
 
 type SidebarProps = {
@@ -91,7 +92,7 @@ export function Sidebar({
                 </p>
                 <p className="text-xs text-slate-500">
                   {thread.mode === "review" ? "코드 분석" : "문장 → 코드"} ·{" "}
-                  {thread.timeLabel}
+                  요청 {thread.requestCount}건 · {thread.timeLabel}
                 </p>
               </button>
             </li>

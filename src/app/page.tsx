@@ -9,7 +9,12 @@ import {
   defaultFilenameForReviewLanguage,
   inferReviewLanguageFromFilename,
 } from "@/components/home/config";
-import { type ApiResult, type WorkspaceMode } from "@/components/home/types";
+import {
+  type ApiResult,
+  type ThreadRun,
+  type ThreadRunStatus,
+  type WorkspaceMode,
+} from "@/components/home/types";
 import {
   GENERATE_LANGUAGES,
   GENERATE_STYLES,
@@ -49,7 +54,14 @@ type ThreadSnapshot = {
   generatePrompt: string;
   generateLanguage: GenerateLanguage;
   generateStyle: GenerateStyle;
-  result: ApiResult | null;
+  runs: ThreadRun[];
+  activeRunId: string | null;
+};
+
+type RunningRequestContext = {
+  controller: AbortController;
+  threadId: string;
+  runId: string;
 };
 
 function createThreadId(): string {
@@ -57,6 +69,26 @@ function createThreadId(): string {
     return crypto.randomUUID();
   }
   return `thread-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createRunId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createThreadRun(mode: WorkspaceMode): ThreadRun {
+  const now = Date.now();
+  return {
+    id: createRunId(),
+    mode,
+    status: "running",
+    createdAt: now,
+    updatedAt: now,
+    result: null,
+    errorMessage: null,
+  };
 }
 
 function createDefaultThread(id: string): ThreadSnapshot {
@@ -73,7 +105,8 @@ function createDefaultThread(id: string): ThreadSnapshot {
     generatePrompt: "",
     generateLanguage: "typescript",
     generateStyle: "clean",
-    result: null,
+    runs: [],
+    activeRunId: null,
   };
 }
 
@@ -162,12 +195,67 @@ function normalizeStoredReviewFile(value: unknown): SelectedReviewFile | null {
   };
 }
 
+function normalizeStoredResult(value: unknown): ApiResult | null {
+  const parsedReview = reviewResponseSchema.safeParse(value);
+  if (parsedReview.success) {
+    return parsedReview.data;
+  }
+
+  const parsedGenerate = generateResponseSchema.safeParse(value);
+  if (parsedGenerate.success) {
+    return parsedGenerate.data;
+  }
+
+  return null;
+}
+
+function normalizeStoredRun(value: unknown): ThreadRun | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const raw = value as Partial<ThreadRun>;
+  if (typeof raw.id !== "string" || !raw.id) {
+    return null;
+  }
+
+  const mode: WorkspaceMode = raw.mode === "generate" ? "generate" : "review";
+  const statusList: ThreadRunStatus[] = [
+    "running",
+    "success",
+    "failed",
+    "cancelled",
+  ];
+  const status = statusList.includes(raw.status as ThreadRunStatus)
+    ? (raw.status as ThreadRunStatus)
+    : "failed";
+
+  return {
+    id: raw.id,
+    mode,
+    status,
+    createdAt:
+      typeof raw.createdAt === "number" && Number.isFinite(raw.createdAt)
+        ? raw.createdAt
+        : Date.now(),
+    updatedAt:
+      typeof raw.updatedAt === "number" && Number.isFinite(raw.updatedAt)
+        ? raw.updatedAt
+        : Date.now(),
+    result: normalizeStoredResult(raw.result),
+    errorMessage:
+      typeof raw.errorMessage === "string" && raw.errorMessage.trim()
+        ? raw.errorMessage
+        : null,
+  };
+}
+
 function normalizeStoredThread(value: unknown): ThreadSnapshot | null {
   if (!value || typeof value !== "object") {
     return null;
   }
 
-  const raw = value as Partial<ThreadSnapshot>;
+  const raw = value as Partial<ThreadSnapshot> & { result?: unknown };
   if (typeof raw.id !== "string" || !raw.id) {
     return null;
   }
@@ -191,6 +279,33 @@ function normalizeStoredThread(value: unknown): ThreadSnapshot | null {
   )
     ? (raw.responseLanguage as ResponseLanguage)
     : "ko";
+  const legacyResult = normalizeStoredResult(raw.result);
+  const normalizedRuns = Array.isArray(raw.runs)
+    ? raw.runs
+        .map((run) => normalizeStoredRun(run))
+        .filter((run): run is ThreadRun => run !== null)
+    : [];
+  const legacyRuns: ThreadRun[] = legacyResult
+    ? [
+        {
+          id: createRunId(),
+          mode: legacyResult.mode,
+          status: "success",
+          createdAt:
+            typeof raw.updatedAt === "number" && Number.isFinite(raw.updatedAt)
+              ? raw.updatedAt
+              : Date.now(),
+          updatedAt:
+            typeof raw.updatedAt === "number" && Number.isFinite(raw.updatedAt)
+              ? raw.updatedAt
+              : Date.now(),
+          result: legacyResult,
+          errorMessage: null,
+        },
+      ]
+    : [];
+  const runs: ThreadRun[] =
+    normalizedRuns.length > 0 ? normalizedRuns : legacyRuns;
 
   return {
     id: raw.id,
@@ -219,10 +334,12 @@ function normalizeStoredThread(value: unknown): ThreadSnapshot | null {
       typeof raw.generatePrompt === "string" ? raw.generatePrompt : "",
     generateLanguage,
     generateStyle,
-    result:
-      raw.result && typeof raw.result === "object"
-        ? (raw.result as ApiResult)
-        : null,
+    runs,
+    activeRunId:
+      typeof raw.activeRunId === "string" &&
+      runs.some((run) => run.id === raw.activeRunId)
+        ? raw.activeRunId
+        : runs[0]?.id ?? null,
   };
 }
 
@@ -263,11 +380,16 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const requestAbortControllerRef = useRef<AbortController | null>(null);
+  const runningRequestRef = useRef<RunningRequestContext | null>(null);
   const storageReadyRef = useRef(false);
 
   const activeThread =
     threads.find((thread) => thread.id === activeThreadId) ?? threads[0] ?? null;
+  const activeRun = activeThread
+    ? activeThread.runs.find((run) => run.id === activeThread.activeRunId) ??
+      activeThread.runs[0] ??
+      null
+    : null;
 
   useEffect(() => {
     try {
@@ -329,17 +451,6 @@ export default function Home() {
     }
   }, [threads, activeThreadId]);
 
-  function abortRunningRequest(showMessage: boolean) {
-    if (requestAbortControllerRef.current) {
-      requestAbortControllerRef.current.abort();
-      requestAbortControllerRef.current = null;
-    }
-    setIsSubmitting(false);
-    if (showMessage) {
-      setErrorMessage("요청을 중지했습니다.");
-    }
-  }
-
   function updateThreadById(
     threadId: string,
     updater: (thread: ThreadSnapshot) => ThreadSnapshot
@@ -356,11 +467,47 @@ export default function Home() {
     );
   }
 
+  function updateThreadRun(
+    threadId: string,
+    runId: string,
+    updater: (run: ThreadRun) => ThreadRun
+  ) {
+    updateThreadById(threadId, (thread) => ({
+      ...thread,
+      runs: thread.runs.map((run) => (run.id === runId ? updater(run) : run)),
+      activeRunId: runId,
+    }));
+  }
+
   function updateActiveThread(updater: (thread: ThreadSnapshot) => ThreadSnapshot) {
     if (!activeThread) {
       return;
     }
     updateThreadById(activeThread.id, updater);
+  }
+
+  function abortRunningRequest(showMessage: boolean) {
+    const running = runningRequestRef.current;
+    if (running) {
+      running.controller.abort();
+      runningRequestRef.current = null;
+
+      updateThreadRun(running.threadId, running.runId, (run) =>
+        run.status === "running"
+          ? {
+              ...run,
+              status: "cancelled",
+              updatedAt: Date.now(),
+              errorMessage: "요청이 사용자에 의해 중지되었습니다.",
+            }
+          : run
+      );
+    }
+
+    setIsSubmitting(false);
+    if (showMessage) {
+      setErrorMessage("요청을 중지했습니다.");
+    }
   }
 
   function handleCancelRequest() {
@@ -387,8 +534,46 @@ export default function Home() {
     setCopiedKey(null);
   }
 
+  function handleSelectRun(runId: string) {
+    updateActiveThread((thread) => {
+      if (!thread.runs.some((run) => run.id === runId)) {
+        return thread;
+      }
+      return {
+        ...thread,
+        activeRunId: runId,
+      };
+    });
+  }
+
   async function handleReviewSubmit() {
     if (!activeThread) {
+      return;
+    }
+
+    const hasInlineCode = activeThread.reviewCode.trim().length > 0;
+    const filename =
+      activeThread.reviewFilename.trim() ||
+      defaultFilenameForReviewLanguage(activeThread.reviewLanguage);
+    const parsedPayload = reviewRequestSchema.safeParse({
+      code: hasInlineCode ? activeThread.reviewCode : undefined,
+      filename: hasInlineCode ? filename : undefined,
+      language: hasInlineCode ? activeThread.reviewLanguage : undefined,
+      files:
+        activeThread.reviewFiles.length > 0
+          ? activeThread.reviewFiles.map((file) => ({
+              filename: file.filename,
+              language: file.language,
+              code: file.code,
+            }))
+          : undefined,
+      responseLanguage: activeThread.responseLanguage,
+    });
+
+    if (!parsedPayload.success) {
+      const message =
+        parsedPayload.error.issues[0]?.message ?? "입력값이 올바르지 않습니다.";
+      setErrorMessage(message);
       return;
     }
 
@@ -396,36 +581,24 @@ export default function Home() {
     setIsSubmitting(true);
     setErrorMessage(null);
 
-    const controller = new AbortController();
-    requestAbortControllerRef.current = controller;
     const currentThreadId = activeThread.id;
+    const run = createThreadRun("review");
+
+    updateThreadById(currentThreadId, (thread) => ({
+      ...thread,
+      mode: "review",
+      runs: [run, ...thread.runs],
+      activeRunId: run.id,
+    }));
+
+    const controller = new AbortController();
+    runningRequestRef.current = {
+      controller,
+      threadId: currentThreadId,
+      runId: run.id,
+    };
 
     try {
-      const hasInlineCode = activeThread.reviewCode.trim().length > 0;
-      const filename =
-        activeThread.reviewFilename.trim() ||
-        defaultFilenameForReviewLanguage(activeThread.reviewLanguage);
-      const parsedPayload = reviewRequestSchema.safeParse({
-        code: hasInlineCode ? activeThread.reviewCode : undefined,
-        filename: hasInlineCode ? filename : undefined,
-        language: hasInlineCode ? activeThread.reviewLanguage : undefined,
-        files:
-          activeThread.reviewFiles.length > 0
-            ? activeThread.reviewFiles.map((file) => ({
-                filename: file.filename,
-                language: file.language,
-                code: file.code,
-              }))
-            : undefined,
-        responseLanguage: activeThread.responseLanguage,
-      });
-
-      if (!parsedPayload.success) {
-        const message =
-          parsedPayload.error.issues[0]?.message ?? "입력값이 올바르지 않습니다.";
-        throw new Error(message);
-      }
-
       const data = await postJson(
         "/api/review",
         parsedPayload.data,
@@ -436,8 +609,19 @@ export default function Home() {
       updateThreadById(currentThreadId, (thread) => ({
         ...thread,
         mode: "review",
-        result: data,
         title: buildThreadTitle(thread, data),
+        runs: thread.runs.map((entry) =>
+          entry.id === run.id
+            ? {
+                ...entry,
+                status: "success",
+                updatedAt: Date.now(),
+                result: data,
+                errorMessage: null,
+              }
+            : entry
+        ),
+        activeRunId: run.id,
       }));
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -445,10 +629,19 @@ export default function Home() {
       }
       const message =
         error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
+      updateThreadRun(currentThreadId, run.id, (entry) => ({
+        ...entry,
+        status: "failed",
+        updatedAt: Date.now(),
+        errorMessage: message,
+      }));
       setErrorMessage(message);
     } finally {
-      if (requestAbortControllerRef.current === controller) {
-        requestAbortControllerRef.current = null;
+      if (
+        runningRequestRef.current?.controller === controller &&
+        runningRequestRef.current?.runId === run.id
+      ) {
+        runningRequestRef.current = null;
         setIsSubmitting(false);
       }
     }
@@ -459,28 +652,42 @@ export default function Home() {
       return;
     }
 
+    const parsedPayload = generateRequestSchema.safeParse({
+      prompt: activeThread.generatePrompt,
+      language: activeThread.generateLanguage,
+      style: activeThread.generateStyle,
+      responseLanguage: activeThread.responseLanguage,
+    });
+
+    if (!parsedPayload.success) {
+      const message =
+        parsedPayload.error.issues[0]?.message ?? "입력값이 올바르지 않습니다.";
+      setErrorMessage(message);
+      return;
+    }
+
     abortRunningRequest(false);
     setIsSubmitting(true);
     setErrorMessage(null);
 
-    const controller = new AbortController();
-    requestAbortControllerRef.current = controller;
     const currentThreadId = activeThread.id;
+    const run = createThreadRun("generate");
+
+    updateThreadById(currentThreadId, (thread) => ({
+      ...thread,
+      mode: "generate",
+      runs: [run, ...thread.runs],
+      activeRunId: run.id,
+    }));
+
+    const controller = new AbortController();
+    runningRequestRef.current = {
+      controller,
+      threadId: currentThreadId,
+      runId: run.id,
+    };
 
     try {
-      const parsedPayload = generateRequestSchema.safeParse({
-        prompt: activeThread.generatePrompt,
-        language: activeThread.generateLanguage,
-        style: activeThread.generateStyle,
-        responseLanguage: activeThread.responseLanguage,
-      });
-
-      if (!parsedPayload.success) {
-        const message =
-          parsedPayload.error.issues[0]?.message ?? "입력값이 올바르지 않습니다.";
-        throw new Error(message);
-      }
-
       const data = await postJson(
         "/api/generate",
         parsedPayload.data,
@@ -491,8 +698,19 @@ export default function Home() {
       updateThreadById(currentThreadId, (thread) => ({
         ...thread,
         mode: "generate",
-        result: data,
         title: buildThreadTitle(thread, data),
+        runs: thread.runs.map((entry) =>
+          entry.id === run.id
+            ? {
+                ...entry,
+                status: "success",
+                updatedAt: Date.now(),
+                result: data,
+                errorMessage: null,
+              }
+            : entry
+        ),
+        activeRunId: run.id,
       }));
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -500,10 +718,19 @@ export default function Home() {
       }
       const message =
         error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
+      updateThreadRun(currentThreadId, run.id, (entry) => ({
+        ...entry,
+        status: "failed",
+        updatedAt: Date.now(),
+        errorMessage: message,
+      }));
       setErrorMessage(message);
     } finally {
-      if (requestAbortControllerRef.current === controller) {
-        requestAbortControllerRef.current = null;
+      if (
+        runningRequestRef.current?.controller === controller &&
+        runningRequestRef.current?.runId === run.id
+      ) {
+        runningRequestRef.current = null;
         setIsSubmitting(false);
       }
     }
@@ -620,6 +847,7 @@ export default function Home() {
       title: thread.title,
       mode: thread.mode,
       timeLabel: formatRelativeTime(thread.updatedAt),
+      requestCount: thread.runs.length,
     }));
 
   if (!activeThread) {
@@ -709,7 +937,9 @@ export default function Home() {
             <ResponsePanel
               isSubmitting={isSubmitting}
               errorMessage={errorMessage}
-              result={activeThread.result}
+              runs={activeThread.runs}
+              activeRunId={activeRun?.id ?? null}
+              onSelectRun={handleSelectRun}
               copiedKey={copiedKey}
               onCopy={copyToClipboard}
             />
