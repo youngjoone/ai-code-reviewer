@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { type ZodType } from "zod";
 import { ResponsePanel } from "@/components/home/ResponsePanel";
-import { Sidebar } from "@/components/home/Sidebar";
+import { Sidebar, type SidebarFilter } from "@/components/home/Sidebar";
 import { WorkspacePanel } from "@/components/home/WorkspacePanel";
 import {
   defaultFilenameForReviewLanguage,
@@ -11,8 +11,10 @@ import {
 } from "@/components/home/config";
 import {
   type ApiResult,
+  type SelectedReviewFile,
   type ThreadRun,
   type ThreadRunStatus,
+  type ThreadSnapshot,
   type WorkspaceMode,
 } from "@/components/home/types";
 import {
@@ -29,34 +31,7 @@ import {
   type ResponseLanguage,
 } from "@/lib/schemas";
 
-const THREAD_STORAGE_KEY = "reviewpilot_threads_v1";
-const ACTIVE_THREAD_STORAGE_KEY = "reviewpilot_active_thread_v1";
 const INITIAL_THREAD_ID = "thread-initial";
-
-type SelectedReviewFile = {
-  id: string;
-  filename: string;
-  language: string;
-  code: string;
-  lineCount: number;
-};
-
-type ThreadSnapshot = {
-  id: string;
-  title: string;
-  mode: WorkspaceMode;
-  updatedAt: number;
-  responseLanguage: ResponseLanguage;
-  reviewCode: string;
-  reviewLanguage: GenerateLanguage;
-  reviewFilename: string;
-  reviewFiles: SelectedReviewFile[];
-  generatePrompt: string;
-  generateLanguage: GenerateLanguage;
-  generateStyle: GenerateStyle;
-  runs: ThreadRun[];
-  activeRunId: string | null;
-};
 
 type RunningRequestContext = {
   controller: AbortController;
@@ -96,6 +71,7 @@ function createDefaultThread(id: string): ThreadSnapshot {
     id,
     title: "새 스레드",
     mode: "review",
+    pinned: false,
     updatedAt: Date.now(),
     responseLanguage: "ko",
     reviewCode: "",
@@ -314,6 +290,7 @@ function normalizeStoredThread(value: unknown): ThreadSnapshot | null {
         ? raw.title
         : "새 스레드",
     mode,
+    pinned: raw.pinned === true,
     updatedAt:
       typeof raw.updatedAt === "number" && Number.isFinite(raw.updatedAt)
         ? raw.updatedAt
@@ -380,8 +357,10 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>("all");
+  const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const runningRequestRef = useRef<RunningRequestContext | null>(null);
-  const storageReadyRef = useRef(false);
+  const dbSyncReadyRef = useRef(false);
 
   const activeThread =
     threads.find((thread) => thread.id === activeThreadId) ?? threads[0] ?? null;
@@ -392,47 +371,49 @@ export default function Home() {
     : null;
 
   useEffect(() => {
-    try {
-      const storedThreadsRaw = localStorage.getItem(THREAD_STORAGE_KEY);
-      const storedActiveThreadId = localStorage.getItem(ACTIVE_THREAD_STORAGE_KEY);
-      if (!storedThreadsRaw) {
-        storageReadyRef.current = true;
-        return;
-      }
+    let ignore = false;
 
-      const parsed = JSON.parse(storedThreadsRaw) as unknown;
-      if (!Array.isArray(parsed)) {
-        storageReadyRef.current = true;
-        return;
-      }
+    async function loadThreads() {
+      try {
+        const response = await fetch("/api/threads", { cache: "no-store" });
+        const data: unknown = await response.json();
+        if (!response.ok) {
+          throw new Error(extractErrorMessage(data));
+        }
 
-      const normalizedThreads = parsed
-        .map((thread) => normalizeStoredThread(thread))
-        .filter((thread): thread is ThreadSnapshot => thread !== null);
+        const rawThreads =
+          data &&
+          typeof data === "object" &&
+          Array.isArray((data as { threads?: unknown }).threads)
+            ? (data as { threads: unknown[] }).threads
+            : [];
 
-      if (normalizedThreads.length === 0) {
-        storageReadyRef.current = true;
-        return;
-      }
+        const normalizedThreads = rawThreads
+          .map((thread) => normalizeStoredThread(thread))
+          .filter((thread): thread is ThreadSnapshot => thread !== null);
 
-      setThreads(normalizedThreads);
-      if (
-        storedActiveThreadId &&
-        normalizedThreads.some((thread) => thread.id === storedActiveThreadId)
-      ) {
-        setActiveThreadId(storedActiveThreadId);
-      } else {
-        setActiveThreadId(normalizedThreads[0].id);
+        if (!ignore && normalizedThreads.length > 0) {
+          setThreads(normalizedThreads);
+          setActiveThreadId(normalizedThreads[0].id);
+        }
+      } catch {
+        // Keep in-memory defaults when DB load fails
+      } finally {
+        if (!ignore) {
+          dbSyncReadyRef.current = true;
+        }
       }
-    } catch {
-      // Ignore storage parse errors and use defaults
-    } finally {
-      storageReadyRef.current = true;
     }
+
+    void loadThreads();
+
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (!storageReadyRef.current) {
+    if (!dbSyncReadyRef.current) {
       return;
     }
 
@@ -443,13 +424,26 @@ export default function Home() {
       return;
     }
 
-    try {
-      localStorage.setItem(THREAD_STORAGE_KEY, JSON.stringify(threads));
-      localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY, activeThreadId);
-    } catch {
-      // Ignore localStorage write errors
-    }
-  }, [threads, activeThreadId]);
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await fetch("/api/threads", {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ threads }),
+          });
+        } catch {
+          // Ignore background sync errors
+        }
+      })();
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [threads]);
 
   function updateThreadById(
     threadId: string,
@@ -532,6 +526,66 @@ export default function Home() {
     setActiveThreadId(threadId);
     setErrorMessage(null);
     setCopiedKey(null);
+  }
+
+  function handleRenameThread(threadId: string) {
+    const target = threads.find((thread) => thread.id === threadId);
+    if (!target) {
+      return;
+    }
+
+    const input = window.prompt("스레드 이름을 입력하세요.", target.title);
+    const nextTitle = input?.trim();
+    if (!nextTitle) {
+      return;
+    }
+
+    updateThreadById(threadId, (thread) => ({
+      ...thread,
+      title: nextTitle,
+    }));
+  }
+
+  function handleTogglePinThread(threadId: string) {
+    updateThreadById(threadId, (thread) => ({
+      ...thread,
+      pinned: !thread.pinned,
+    }));
+  }
+
+  function handleDeleteThread(threadId: string) {
+    const target = threads.find((thread) => thread.id === threadId);
+    if (!target) {
+      return;
+    }
+
+    const confirmDelete = window.confirm(
+      `스레드 "${target.title}"를 삭제할까요?\n삭제하면 실행 기록도 함께 사라집니다.`
+    );
+    if (!confirmDelete) {
+      return;
+    }
+
+    if (activeThreadId === threadId) {
+      abortRunningRequest(false);
+    }
+
+    const remainingThreads = threads.filter((thread) => thread.id !== threadId);
+    if (remainingThreads.length === 0) {
+      const fallbackThread = createDefaultThread(createThreadId());
+      setThreads([fallbackThread]);
+      setActiveThreadId(fallbackThread.id);
+      setErrorMessage(null);
+      setCopiedKey(null);
+      return;
+    }
+
+    setThreads(remainingThreads);
+    if (activeThreadId === threadId) {
+      setActiveThreadId(remainingThreads[0].id);
+      setErrorMessage(null);
+      setCopiedKey(null);
+    }
   }
 
   function handleSelectRun(runId: string) {
@@ -825,27 +879,58 @@ export default function Home() {
     }
   }
 
+  const normalizedSearchQuery = threadSearchQuery.trim().toLowerCase();
   const sidebarCategories = [
     {
+      id: "all" as const,
+      name: "전체",
+      count: threads.length,
+    },
+    {
+      id: "review" as const,
       name: "코드 리뷰",
       count: threads.filter((thread) => thread.mode === "review").length,
     },
     {
+      id: "generate" as const,
       name: "문장 → 코드",
       count: threads.filter((thread) => thread.mode === "generate").length,
     },
     {
-      name: "전체",
-      count: threads.length,
+      id: "pinned" as const,
+      name: "고정",
+      count: threads.filter((thread) => thread.pinned).length,
     },
   ];
 
   const sidebarThreads = [...threads]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .filter((thread) => {
+      if (sidebarFilter === "review") {
+        return thread.mode === "review";
+      }
+      if (sidebarFilter === "generate") {
+        return thread.mode === "generate";
+      }
+      if (sidebarFilter === "pinned") {
+        return thread.pinned;
+      }
+      return true;
+    })
+    .filter((thread) => {
+      if (!normalizedSearchQuery) {
+        return true;
+      }
+      return thread.title.toLowerCase().includes(normalizedSearchQuery);
+    })
+    .sort(
+      (a, b) =>
+        Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt
+    )
     .map((thread) => ({
       id: thread.id,
       title: thread.title,
       mode: thread.mode,
+      pinned: thread.pinned,
       timeLabel: formatRelativeTime(thread.updatedAt),
       requestCount: thread.runs.length,
     }));
@@ -860,9 +945,16 @@ export default function Home() {
         <Sidebar
           categories={sidebarCategories}
           threads={sidebarThreads}
+          activeFilter={sidebarFilter}
           activeThreadId={activeThread.id}
+          searchQuery={threadSearchQuery}
           onNewThread={handleNewThread}
+          onFilterChange={setSidebarFilter}
+          onSearchQueryChange={setThreadSearchQuery}
           onSelectThread={handleSelectThread}
+          onRenameThread={handleRenameThread}
+          onTogglePinThread={handleTogglePinThread}
+          onDeleteThread={handleDeleteThread}
         />
 
         <main className="min-h-0 flex-1 overflow-y-auto border-t border-slate-200/80 bg-white/75 px-4 py-5 md:border-t-0 md:border-l md:px-8 md:py-7">

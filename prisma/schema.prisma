@@ -1,0 +1,74 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum WorkspaceMode {
+  review
+  generate
+}
+
+enum RunStatus {
+  running
+  success
+  failed
+  cancelled
+}
+
+enum ResponseLanguage {
+  ko
+  en
+}
+
+enum GenerateLanguage {
+  typescript
+  javascript
+  python
+  java
+  kotlin
+}
+
+enum GenerateStyle {
+  clean
+  fast
+  explain
+}
+
+model Thread {
+  id               String           @id
+  title            String
+  mode             WorkspaceMode
+  pinned           Boolean
+  responseLanguage ResponseLanguage
+  reviewCode       String
+  reviewLanguage   GenerateLanguage
+  reviewFilename   String
+  reviewFiles      Json
+  generatePrompt   String
+  generateLanguage GenerateLanguage
+  generateStyle    GenerateStyle
+  activeRunId      String?
+  createdAt        DateTime
+  updatedAt        DateTime
+  runs             Run[]
+
+  @@index([updatedAt])
+}
+
+model Run {
+  id           String        @id
+  threadId     String
+  mode         WorkspaceMode
+  status       RunStatus
+  result       Json?
+  errorMessage String?
+  createdAt    DateTime
+  updatedAt    DateTime
+  thread       Thread        @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+}
